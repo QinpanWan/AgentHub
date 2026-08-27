@@ -1,17 +1,104 @@
 # AgentHub · 鸿蒙 PC 跨 Agent 管理平台
 
-集中管理 **Codex / Claude / dsh** 三个 Agent 的轻量管理平台：实时资源与工作状况监控、报错收集、对话窗任务派发（选 Agent / 选模型 / 选思考强度）、Agent 启停、插件与技能管理。纯 Node 零依赖，Web UI 商务简约风，部署启动走 **HiShell 指令**（`sh hish ...`）。
+集中管理 **Codex / Claude / dsh** 三个 Agent 的轻量管理平台：实时资源与工作状况监控、报错收集、对话窗任务派发（选 Agent / 选模型 / 选思考强度）、Agent 启停、插件与技能管理。
 
+- 纯 Node 实现，**零 npm 依赖**（仅内置模块），无原生二进制
+- Web UI 商务简约风，无框架，开箱即用
+- 完整生命周期命令：安装 / 启动 / 健康检查 / 修复 / 卸载一条龙
 - 运行时：Node ≥ 18（本机实测 v22.7.0）
-- 服务：127.0.0.1:8899（可用 `HUB_PORT` 覆盖）
-- 依赖：**零 npm 依赖**（仅 node 内置模块），无原生二进制
+- 服务：`127.0.0.1:8899`（可用 `HUB_PORT` 覆盖）
+
+---
+
+## 快速安装
+
+在鸿蒙 PC 的 **HiShell 终端**中：
+
+```sh
+git clone https://github.com/Entity-Him/AgentHub.git
+cd AgentHub
+sh hish install        # 完整安装:校验环境 + 建数据目录 + 安装 hish 命令
+```
+
+`install` 会依次完成：
+
+1. 校验 Node（未找到时可用 `HUB_NODE` 指定路径）
+2. 创建数据目录 `data/logs`、`data/backups`
+3. 校验服务端入口与 dsh headless 适配补丁
+4. 将 `hish` 软链到 `~/.local/bin/hish`，之后可直接执行 `hish`（失败不影响使用，继续用 `sh hish` 即可）
+
+安装完成后浏览器访问 **http://127.0.0.1:8899**。
+
+> 跳过自动软链：`HUB_SKIP_LINK=1 sh hish install`
+
+## 启动与停止
+
+```sh
+hish start        # 启动(幂等,带健康检查,失败自动给出日志)
+hish stop         # 停止
+hish restart      # 重启
+```
+
+## 状态 · 健康检查 · 修复
+
+```sh
+hish status       # 运行状态 + 最近日志
+hish health       # 健康检查(/api/health),退出码 0=健康
+hish repair       # 自检并自动修复
+hish log          # 跟踪日志
+hish test         # 单元自测(无需服务在线)
+```
+
+`repair`（别名 `fix`）会自动处理常见故障：
+
+- 补齐缺失的数据目录
+- 清理已失效的陈旧 pid 文件
+- 进程存活但健康检查失败 → 强制重启
+- 服务未运行 → 自动启动
+- 端口被其他实例占用 → 明确提示，不误杀
+
+## 卸载
+
+```sh
+hish uninstall            # 停止服务 + 移除 ~/.local/bin/hish 软链(保留数据)
+hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
+```
+
+## 命令一览
+
+| 命令 | 说明 | 退出码 |
+|---|---|---|
+| `hish install` | 完整安装（校验环境 / 建目录 / 装命令软链） | 0=成功 |
+| `hish deploy` | 部署检查（兼容旧版） | 0=成功 |
+| `hish start` | 启动（幂等，带健康检查） | 0=已就绪 |
+| `hish stop` | 停止 | 0 |
+| `hish restart` | 重启 | 0=已就绪 |
+| `hish status` | 运行状态 + 最近日志 | 0 |
+| `hish health` | 健康检查 | 0=健康，1=异常 |
+| `hish repair` | 自检修复（`fix` 为别名） | 0=修复后健康 |
+| `hish log` | 跟踪日志 | 0 |
+| `hish test` | 单元自测（无需服务在线） | 0=通过 |
+| `hish uninstall` | 卸载（`--purge` 删数据） | 0 |
+| `hish version` | 查看版本 | 0 |
+
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `HUB_PORT` | `8899` | 服务端口 |
+| `HUB_NODE` | 自动探测 | node 可执行文件路径 |
+| `HUB_LOG` | `data/hub.log` | 日志文件路径 |
+| `HUB_SKIP_LINK` | 空 | 设为 `1` 时 install 跳过命令软链 |
+| `DSH_NODE` | 同 `HUB_NODE` | dsh headless 用 node |
+| `DSH_DIR` | `~/dsh-test` | dsh 安装目录 |
+| `DSH_WEB_SCRIPT` | `~/bin/dsh-web.sh` | dsh web 启动脚本 |
 
 ---
 
 ## 架构
 
 ```
-┌────────────────────────── HiShell 终端 (sh hish start) ─────────────────────────┐
+┌────────────────────────── HiShell 终端 (hish start) ────────────────────────────┐
 │                                                                                   │
 │  AgentHub  (server/index.js, 纯 Node, 零依赖)                                     │
 │  ├── monitor    /proc 直读 + ps 兜底, 2s 采样系统/进程 CPU、内存、负载、磁盘        │
@@ -25,22 +112,6 @@
 │        └──→ node dsh/bin.js --profile headless (鸿蒙适配补丁)                     │
 └──────── Web UI (web/, 商务简约风, 无框架) ◀── 浏览器 http://127.0.0.1:8899 ────────┘
 ```
-
-## 快速开始（HiShell）
-
-在鸿蒙 PC 的 **HiShell 终端**中：
-
-```sh
-sh hish deploy        # 首次部署:校验 node、建数据目录、检查 headless 补丁
-sh hish start         # 启动(幂等,带健康检查,失败自动回滚提示)
-sh hish status        # 运行状态 + 最近日志
-sh hish stop          # 停止
-sh hish restart       # 重启
-sh hish log           # 跟踪日志
-sh hish test          # 单元自测(无需服务在线)
-```
-
-然后浏览器访问 **http://127.0.0.1:8899**。
 
 ## 功能
 
@@ -90,7 +161,6 @@ sh hish test          # 单元自测(无需服务在线)
 ## 配置
 
 - 默认配置内置在 `server/config.js`；用户覆盖写入 `data/config.json`（设置页修改后自动保存）。
-- 环境变量：`HUB_PORT`（端口）、`HUB_NODE`（node 路径）、`DSH_NODE`（dsh headless 用 node）、`DSH_DIR`（dsh 安装目录，默认 `~/dsh-test`）、`DSH_WEB_SCRIPT`（dsh web 启动脚本，默认 `~/bin/dsh-web.sh`）。
 - 数据目录：`data/`（配置、日志、任务历史、备份）。
 
 ## 鸿蒙适配要点（实测沉淀）
@@ -99,6 +169,17 @@ sh hish test          # 单元自测(无需服务在线)
 2. **dsh headless 需要扩展补丁**：`dsh-session-persistence-jsonl` 依赖 `node:zlib` 的 zstd 导出（Node≥22.15），而本机 PATH node 为 v22.7；且 `/data/service` 的 v24 node 在 headless 下会原生 errno 崩溃。agent-hub 内置补丁额外禁用了 `session-persistence-jsonl`、`session-checkpoint-policy`，使 v22.7 可完整跑 headless（一次性任务不依赖会话持久化）。
 3. **凭据自动注入**：从 `~/.dsh/.credentials.yaml` 解析 `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` 注入执行环境，不落盘、不打印。
 4. **dsh 插件启停是共享资源变更**：修改 `~/.dsh/profiles/web/package.json` 前自动备份到 `data/backups/`，需显式确认，且要求重启 dsh 才生效；Skills 开关为平台侧记录。
+
+## 故障排查
+
+| 现象 | 处理 |
+|---|---|
+| `未找到 node` | 设置 `HUB_NODE=/path/to/node` 后重试 |
+| 启动失败 / 端口被占用 | `hish status` 看日志；端口占用时 `HUB_PORT=8900 hish start` 换端口，或先停掉占用实例 |
+| 健康检查异常 | 先 `hish health` 确认，再 `hish repair` 自动修复（清理陈旧 pid / 强制重启） |
+| 服务未运行但端口有响应 | 多为其他目录的实例占用，`repair` 会明确提示，不会误杀 |
+| dsh 任务不可用 | 检查 `assets/harmony-headless.patch.yml` 是否存在（`hish install` 会校验） |
+| Claude 任务报错 | 属未安装的预期行为，按提示执行 `npm i -g @anthropic-ai/claude-code` |
 
 ## 限制
 

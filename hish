@@ -1,8 +1,8 @@
 #!/bin/sh
 # ============================================================
-# AgentHub · HiShell 部署/启动脚本 (鸿蒙 PC)
-# 用法: sh hish <deploy|start|stop|restart|status|log|test|help>
-#   环境变量: HUB_PORT(默认8899) HUB_NODE(node路径) HUB_LOG
+# AgentHub · HiShell 生命周期脚本 (鸿蒙 PC)
+# 用法: sh hish <install|deploy|start|stop|restart|status|health|repair|log|test|uninstall|version|help>
+#   环境变量: HUB_PORT(默认8899) HUB_NODE(node路径) HUB_LOG HUB_SKIP_LINK
 # ============================================================
 set -u
 
@@ -77,6 +77,49 @@ cmd_deploy() {
   echo "hish:   浏览器访问 http://$HOST:$PORT"
 }
 
+cmd_install() {
+  NODE_BIN=$(find_node)
+  if [ -z "$NODE_BIN" ]; then
+    echo "hish: 错误 未找到 node,可设置 HUB_NODE 指定路径后重试"
+    exit 1
+  fi
+  echo "hish: [1/5] 运行环境 node = $NODE_BIN ($("$NODE_BIN" --version 2>/dev/null))"
+  mkdir -p "$HUB_DIR/data/logs" "$HUB_DIR/data/backups"
+  echo "hish: [2/5] 数据目录 OK (data/logs, data/backups)"
+  if [ -f "$HUB_DIR/server/index.js" ]; then
+    echo "hish: [3/5] 服务端入口 OK (server/index.js)"
+  else
+    echo "hish: 错误 缺少 server/index.js,安装不完整"
+    exit 1
+  fi
+  if [ -f "$HUB_DIR/assets/harmony-headless.patch.yml" ]; then
+    echo "hish: [4/5] dsh headless 适配补丁 OK"
+  else
+    echo "hish: [4/5] 警告 缺少 assets/harmony-headless.patch.yml,dsh 任务将不可用"
+  fi
+  if [ "${HUB_SKIP_LINK:-0}" != "1" ]; then
+    BIN_DIR="${HOME:-$HUB_DIR}/.local/bin"
+    LINK="$BIN_DIR/hish"
+    mkdir -p "$BIN_DIR" 2>/dev/null
+    if [ -e "$LINK" ] || [ -L "$LINK" ]; then
+      if [ "$(readlink "$LINK" 2>/dev/null)" = "$HUB_DIR/hish" ]; then
+        echo "hish: [5/5] 命令软链已存在 → $LINK"
+      else
+        echo "hish: [5/5] 警告 $LINK 已被其他文件占用,未覆盖;可手动: ln -s $HUB_DIR/hish $LINK"
+      fi
+    elif ln -s "$HUB_DIR/hish" "$LINK" 2>/dev/null; then
+      echo "hish: [5/5] 已安装命令 → $LINK (之后可直接执行 hish)"
+    else
+      echo "hish: [5/5] 提示 创建软链失败(权限?),可继续用 sh hish ... 调用"
+    fi
+  fi
+  echo "hish: 安装完成。下一步:"
+  echo "hish:   hish start       # 启动(或 sh hish start)"
+  echo "hish:   hish status      # 查看状态"
+  echo "hish:   hish health      # 健康检查"
+  echo "hish:   浏览器访问 http://$HOST:$PORT"
+}
+
 cmd_start() {
   NODE_BIN=$(find_node)
   if [ -z "$NODE_BIN" ]; then echo "hish: 未找到 node(可设置 HUB_NODE)"; exit 1; fi
@@ -148,6 +191,113 @@ cmd_status() {
   fi
 }
 
+cmd_health() {
+  NODE_BIN=$(find_node)
+  if [ -z "$NODE_BIN" ]; then
+    echo "hish: 未找到 node(可设置 HUB_NODE)"
+    exit 1
+  fi
+  if ! is_running; then
+    echo "hish: 健康 = 未运行(无 pid 文件 $PID_FILE)"
+    echo "hish: 修复建议: sh hish start 或 sh hish repair"
+    exit 1
+  fi
+  pid=$(cat "$PID_FILE" 2>/dev/null)
+  if health "$NODE_BIN"; then
+    echo "hish: 健康 = OK (pid $pid) · http://$HOST:$PORT"
+    exit 0
+  fi
+  echo "hish: 健康 = 异常 (pid $pid 存活但 /api/health 无响应,端口可能被占用)"
+  echo "hish: 修复建议: sh hish repair"
+  exit 1
+}
+
+cmd_repair() {
+  echo "hish: 开始自检修复…"
+  NODE_BIN=$(find_node)
+  if [ -z "$NODE_BIN" ]; then
+    echo "hish: 错误 未找到 node,可设置 HUB_NODE 指定路径"
+    exit 1
+  fi
+  FIXED=0
+  mkdir -p "$HUB_DIR/data/logs" "$HUB_DIR/data/backups"
+  echo "hish: 检查 数据目录 OK"
+  for f in server/index.js assets/harmony-headless.patch.yml; do
+    if [ ! -f "$HUB_DIR/$f" ]; then
+      echo "hish: 警告 缺少 $f"
+    fi
+  done
+  if [ -f "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+      echo "hish: 修复 清理陈旧 pid 文件 ($PID_FILE)"
+      rm -f "$PID_FILE"
+      FIXED=1
+    fi
+  fi
+  if ! is_running && health "$NODE_BIN"; then
+    echo "hish: 错误 端口 $PORT 已被其他 AgentHub 实例占用(非本目录进程)"
+    echo "hish:       可用 HUB_PORT=<其他端口> sh hish start 指定新端口,或先停掉占用实例"
+    exit 1
+  fi
+  if is_running; then
+    if health "$NODE_BIN"; then
+      echo "hish: 状态 运行中且健康,无需重启"
+    else
+      echo "hish: 修复 进程存活但健康检查失败,强制重启"
+      cmd_stop >/dev/null 2>&1
+      FIXED=1
+      cmd_start
+    fi
+  else
+    echo "hish: 修复 服务未运行,尝试启动"
+    FIXED=1
+    cmd_start
+  fi
+  if is_running && health "$NODE_BIN"; then
+    if [ "$FIXED" = "1" ]; then
+      echo "hish: 修复完成,服务健康 → http://$HOST:$PORT"
+    else
+      echo "hish: 检查完成,无需修复 → http://$HOST:$PORT"
+    fi
+    exit 0
+  fi
+  echo "hish: 修复失败,最近日志:"
+  tail -n 10 "$LOG_FILE" 2>/dev/null
+  exit 1
+}
+
+cmd_uninstall() {
+  PURGE=0
+  case "${1:-}" in
+    --purge|-p) PURGE=1 ;;
+    "") ;;
+    *) echo "hish: 未知参数 $1 (可用 --purge 删除数据)"; exit 1 ;;
+  esac
+  echo "hish: 停止服务…"
+  cmd_stop
+  LINK="${HOME:-$HUB_DIR}/.local/bin/hish"
+  if [ -L "$LINK" ] && [ "$(readlink "$LINK" 2>/dev/null)" = "$HUB_DIR/hish" ]; then
+    rm -f "$LINK"
+    echo "hish: 已移除命令软链 $LINK"
+  fi
+  if [ "$PURGE" = "1" ]; then
+    if [ -d "$HUB_DIR/data" ]; then
+      rm -rf "$HUB_DIR/data"
+      echo "hish: 已删除数据目录 $HUB_DIR/data (配置/日志/任务历史)"
+    fi
+  else
+    echo "hish: 保留数据目录 $HUB_DIR/data (加 --purge 可一并删除)"
+  fi
+  echo "hish: 卸载完成。仓库: https://github.com/Entity-Him/AgentHub"
+}
+
+cmd_version() {
+  if [ -f "$HUB_DIR/package.json" ]; then
+    grep -m1 '"version"' "$HUB_DIR/package.json" | cut -d'"' -f4
+  fi
+}
+
 cmd_log() {
   if [ ! -f "$LOG_FILE" ]; then echo "hish: 日志不存在: $LOG_FILE"; exit 1; fi
   if command -v tail >/dev/null 2>&1; then
@@ -173,24 +323,34 @@ cmd_test() {
 
 cmd_help() {
   echo "AgentHub HiShell 脚本用法:"
-  echo "  sh hish deploy    首次部署检查(环境/补丁/目录)"
-  echo "  sh hish start     启动平台(幂等,带健康检查)"
-  echo "  sh hish stop      停止平台"
-  echo "  sh hish restart   重启平台"
-  echo "  sh hish status    查看状态"
-  echo "  sh hish log       跟踪日志"
-  echo "  sh hish test      运行自测(无需服务在线)"
-  echo "环境变量: HUB_PORT / HUB_NODE / HUB_LOG"
+  echo "  hish install      完整安装(校验环境/建目录/安装命令软链)"
+  echo "  hish deploy       部署检查(兼容旧版)"
+  echo "  hish start        启动平台(幂等,带健康检查)"
+  echo "  hish stop         停止平台"
+  echo "  hish restart      重启平台"
+  echo "  hish status       查看状态"
+  echo "  hish health       健康检查(退出码 0=健康)"
+  echo "  hish repair       自检修复(补目录/清陈旧pid/健康失败自动重启)"
+  echo "  hish log          跟踪日志"
+  echo "  hish test         运行自测(无需服务在线)"
+  echo "  hish uninstall    卸载(停止+移除软链; --purge 删除数据)"
+  echo "  hish version      查看版本"
+  echo "环境变量: HUB_PORT(端口) / HUB_NODE(node路径) / HUB_LOG(日志路径) / HUB_SKIP_LINK(安装跳过软链)"
 }
 
 case "${1:-help}" in
+  install) cmd_install ;;
   deploy) cmd_deploy ;;
   start) cmd_start ;;
   stop) cmd_stop ;;
   restart) cmd_restart ;;
   status) cmd_status ;;
+  health) cmd_health ;;
+  repair|fix) cmd_repair ;;
   log) cmd_log ;;
   test) cmd_test ;;
+  uninstall) cmd_uninstall "${2:-}" ;;
+  version|-v) cmd_version ;;
   help|-h|--help) cmd_help ;;
   *) echo "hish: 未知命令 $1"; cmd_help; exit 1 ;;
 esac
