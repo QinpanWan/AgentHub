@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="AgentHub">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c89b6a"/>
+      <stop offset="1" stop-color="#a4713f"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.5" cy="0.26" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="32" y="32" width="448" height="448" rx="118" fill="url(#bg)"/>
+  <rect x="32" y="32" width="448" height="448" rx="118" fill="url(#sheen)"/>
+
+  <!-- spokes connecting hub to each agent node -->
+  <g stroke="#fdf7ec" stroke-width="32" stroke-linecap="round" fill="none">
+    <line x1="256" y1="262" x2="256" y2="134"/>
+    <line x1="256" y1="262" x2="367" y2="326"/>
+    <line x1="256" y1="262" x2="145" y2="326"/>
+  </g>
+
+  <!-- hub node -->
+  <circle cx="256" cy="262" r="76" fill="#fdf7ec"/>
+  <circle cx="256" cy="262" r="86" fill="none" stroke="#fdf7ec" stroke-opacity="0.28" stroke-width="8"/>
+  <!-- agent nodes (Codex / Claude / dsh) -->
+  <circle cx="256" cy="134" r="45" fill="#fdf7ec"/>
+  <circle cx="367" cy="326" r="45" fill="#fdf7ec"/>
+  <circle cx="145" cy="326" r="45" fill="#fdf7ec"/>
+</svg>

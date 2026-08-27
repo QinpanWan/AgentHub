@@ -36,6 +36,31 @@ sh hish install        # 完整安装:校验环境 + 建数据目录 + 安装 hi
 
 > 跳过自动软链：`HUB_SKIP_LINK=1 sh hish install`
 
+## 安装 Claude（鸿蒙原生终端）
+
+AgentHub 的 Claude 执行器需要本机可用的 `claude` 命令；鸿蒙 PC 的依赖环境为 **DevNode-OH**，即只需安装一个 Node.js。
+
+1. 安装 Node.js（DevNode-OH 环境即可，AgentHub 本身要求 Node ≥ 18）。
+2. 在鸿蒙原生终端执行，注册 `claude` 别名（经 npx 运行指定版本，免全局安装）：
+
+```sh
+echo 'alias claude="npx @anthropic-ai/claude-code@2.1.112"' >> ~/.zshrc && source ~/.zshrc
+```
+
+3. 执行 `claude` 启动，并按需配置模型（以 DeepSeek 为例，将 `<你的 DeepSeek API Key>` 替换为真实 Key）：
+
+```sh
+export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+export ANTHROPIC_AUTH_TOKEN=<你的 DeepSeek API Key>
+export ANTHROPIC_MODEL=deepseek-v4-pro[1m]
+export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]
+export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
+```
+
+以上是 DeepSeek 模型配置；如需配置其他模型，直接参考对应模型厂商的文档即可。环境变量建议一并写入 `~/.zshrc` 以持久生效。
+
 ## 启动与停止
 
 ```sh
