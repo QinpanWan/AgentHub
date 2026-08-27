@@ -159,7 +159,6 @@ function switchView(view) {
   if (vEl) vEl.classList.remove('hidden');
   $('#page-title').textContent = TITLES[view] || view;
   // 视图切换本身不依赖渲染成功:子渲染失败只提示,不阻塞导航
-  try { closeTaskStream(); } catch { /* ignore */ }
   try { loadView(view); } catch (e) { toast('视图加载错误: ' + e.message, 'err'); }
 }
 window.addEventListener('hashchange', route);
@@ -175,11 +174,14 @@ function loadView(view) {
       refreshTaskList();
       if (state.status && Array.isArray(state.status.agents) && state.status.agents.length) {
         initConsoleForm();
+        // 切回控制台时,若任务仍在运行/排队但流已断开,自动重连(切走页面不中断任务)
+        resumeTaskStream();
       } else {
         // Agent 状态未就绪(轮询未返回):先占位,就绪后自动重建
         const el = $('#view-console');
         if (el) el.innerHTML = `<div class="card"><div class="small muted"><span class="spin"></span>正在加载 Agent 列表…</div></div>`;
         state._consolePending = true;
+        setTimeout(resumeTaskStream, 1000);
       }
     }
     else if (view === 'settings') { loadSettings(); }
@@ -198,6 +200,7 @@ async function refreshStatus() {
     if (state.view === 'console' && state._consolePending && Array.isArray(d.agents) && d.agents.length) {
       state._consolePending = false;
       initConsoleForm();
+      resumeTaskStream();
     }
     if (state.view === 'overview') { renderOverview(d); refreshTaskList(); }
     else if (state.view === 'agents') renderAgents(d);
@@ -618,11 +621,22 @@ function closeTaskStream() {
   if (state.console.es) { try { state.console.es.close(); } catch { /* ignore */ } state.console.es = null; }
 }
 
+// 任务流断线兜底:任务仍在运行/排队但没有活跃 SSE 时,重建连接继续收输出
+function resumeTaskStream() {
+  const id = state.console.taskId;
+  if (!id || state.console.es) return;
+  const msg = state.console.messages.find(m => m.taskId === id && (m.status === 'running' || m.status === 'queued'));
+  if (!msg) return;
+  openTaskStream(id, msg);
+}
+
 async function viewTask(id) {
   try {
     const d = await api('/api/tasks/' + id);
     const t = d.task;
     closeTaskStream();
+    // 查看的是运行/排队中的任务:先把控制台挂到它上面,再切视图/重连,避免重连到旧任务
+    if (t.status === 'running' || t.status === 'queued') state.console.taskId = id;
     if (state.view !== 'console') switchView('console');
     if (!state.console.messages.some(m => m.taskId === id)) {
       const a = ((state.status && state.status.agents) || []).find(x => x.id === t.agentId);
@@ -630,6 +644,7 @@ async function viewTask(id) {
       state.console.messages.push({ id: 't' + id, role: 'agent', agentId: t.agentId, agentName: a ? a.name : t.agentId, icon: a ? a.icon : '◈', model: t.model, effort: t.effort, text: (t.output || '(无输出)') + (t.error ? `\n\n[错误] ${t.error}` : ''), status: t.status, taskId: id });
       renderChat();
     }
+    resumeTaskStream();
   } catch (e) { toast(e.message, 'err'); }
 }
 

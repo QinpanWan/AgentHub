@@ -2,6 +2,7 @@
 //   L1(默认,无需服务): 配置/日志/监控/Agent 探测/任务执行器(用假 Agent)
 //   L2(--http): 需服务在线,走真实 HTTP 端点;真实 codex 任务(不可用时 SKIP)
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,9 @@ async function l1() {
 
   // 5. 任务执行器(假 Agent)
   console.log('  任务执行器(假 Agent):');
+  const TASKS_FILE = path.join(ROOT, 'data', 'tasks.json');
+  let origTasks = '';
+  try { origTasks = fs.readFileSync(TASKS_FILE, 'utf8'); } catch { /* ignore */ }
   const { Runner } = await import(path.join(ROOT, 'server', 'runner.js'));
   const fakeAgent = {
     id: 'echo', name: 'echo', available: true, taskId: null, lastActivityAt: 0,
@@ -100,6 +104,31 @@ async function l1() {
   runner.cancel(blocker.id);
   await sleep(200);
   t('排队任务可取消', runner.get(blocker.id).status === 'cancelled');
+
+  // 提交即落盘:服务在任务排队/运行期间重启也不丢任务
+  const tk3 = runner.submit({ agentId: 'echo', model: 'auto', effort: 'low', prompt: 'persist-check' });
+  const persistedNow = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8'));
+  t('任务提交即落盘', Array.isArray(persistedNow) && persistedNow.some(x => x.id === tk3.id && ['queued', 'running'].includes(x.status)));
+  runner.cancel(tk3.id);
+  await sleep(300);
+
+  // 重启恢复:新 Runner 实例(模拟服务重启)把持久化的 running/queued 任务重新入队
+  const recId = 'rec' + Date.now().toString(36).slice(-5);
+  fs.writeFileSync(TASKS_FILE, JSON.stringify([
+    { id: recId, agentId: 'echo', model: 'auto', effort: 'low', prompt: 'recover-running', status: 'running', createdAt: Date.now(), startedAt: Date.now(), finishedAt: null, exitCode: null, error: null, output: '', events: [] },
+    { id: recId + 'q', agentId: 'echo', model: 'auto', effort: 'low', prompt: 'recover-queued', status: 'queued', createdAt: Date.now(), startedAt: null, finishedAt: null, exitCode: null, error: null, output: '', events: [] }
+  ]));
+  const slowAgent = { ...fakeAgent, buildArgs: () => ['-e', 'setTimeout(()=>{}, 8000);'] };
+  const runner3 = new Runner({ agents: { get: () => slowAgent }, logstore: ls, config: { queueLimit: 20, maxTaskMinutes: 1 } });
+  const rec = runner3.get(recId);
+  t('重启后 running 任务重新入队', rec && ['queued', 'running'].includes(rec.status), JSON.stringify(rec && rec.status));
+  const recq = runner3.get(recId + 'q');
+  t('重启后 queued 任务重新入队', recq && ['queued', 'running'].includes(recq.status), JSON.stringify(recq && recq.status));
+  t('重启后计数不为零', runner3.counts().running + runner3.counts().queued >= 2);
+  runner3.cancel(recId);
+  runner3.cancel(recId + 'q');
+  await sleep(300);
+  try { fs.writeFileSync(TASKS_FILE, origTasks); } catch { /* ignore */ }
 
   // 6. 插件扫描
   console.log('  插件/技能扫描:');

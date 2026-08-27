@@ -19,6 +19,29 @@ export class Runner {
     this.listeners = new Map();    // taskId -> Set<cb>
     this._persistTimer = null;
     this._loadPersisted();
+    this._recoverInFlight();
+  }
+
+  // 服务重启后恢复:持久化里仍为 queued/running 的任务重新入队执行,
+  // 避免运行中的任务在重启后凭空消失(概览运行中/排队计数归零、会话看起来"断了")
+  _recoverInFlight() {
+    const now = Date.now();
+    for (const t of this.tasks.values()) {
+      if (t.status !== 'queued' && t.status !== 'running') continue;
+      const prev = t.status;
+      t.status = 'queued';
+      t.startedAt = null;
+      t.finishedAt = null;
+      t.error = null;
+      t._seq = 0;
+      t.events = [];
+      const q = this.queues.get(t.agentId) || [];
+      if (!q.includes(t.id)) q.push(t.id);
+      this.queues.set(t.agentId, q);
+      try { this.logstore.push(t.agentId, 'warn', `[task ${t.id}] 服务重启,任务重新入队执行(原状态:${prev})`); } catch { /* ignore */ }
+      this._emit(t, { type: 'queued', ts: now });
+    }
+    for (const agentId of this.queues.keys()) this._pump(agentId);
   }
 
   _loadPersisted() {
@@ -66,6 +89,7 @@ export class Runner {
       _seq: 0 // 事件序号(SSE 重连重放去重用)
     };
     this.tasks.set(task.id, task);
+    this._persist(); // 提交即落盘:服务在排队/运行期间重启也不丢任务
     q.push(task.id);
     this.queues.set(agentId, q);
     this._emit(task, { type: 'queued', ts: Date.now() });
@@ -139,6 +163,7 @@ export class Runner {
     agent.taskId = task.id;
     agent.lastActivityAt = Date.now();
     this._emit(task, { type: 'started', ts: Date.now(), agentId: agent.id });
+    this._persist(); // 启动即落盘:运行中的任务在重启后仍可恢复
 
     let cmd, args, cwd, env;
     try {
