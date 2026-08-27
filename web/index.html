@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentHub · 跨 Agent 管理平台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">AH</div>
+      <div class="brand-text"><b>AgentHub</b><span>鸿蒙 PC · 跨 Agent 管理</span></div>
+    </div>
+    <nav class="nav">
+      <a href="#/overview" data-view="overview" class="active"><span class="nav-ico">◈</span>概览</a>
+      <a href="#/console" data-view="console"><span class="nav-ico">✎</span>任务控制台</a>
+      <a href="#/agents" data-view="agents"><span class="nav-ico">⬢</span>Agent 管理</a>
+      <a href="#/monitor" data-view="monitor"><span class="nav-ico">◉</span>运行监控</a>
+      <a href="#/logs" data-view="logs"><span class="nav-ico">☰</span>日志与报错</a>
+      <a href="#/plugins" data-view="plugins"><span class="nav-ico">▤</span>插件与技能</a>
+      <a href="#/workspaces" data-view="workspaces"><span class="nav-ico">▦</span>工作区</a>
+      <a href="#/settings" data-view="settings"><span class="nav-ico">⚙</span>设置</a>
+    </nav>
+    <div class="side-foot">
+      <div class="foot-line">HiShell 部署启动</div>
+      <code class="foot-code">./hish start</code>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="page-title">概览</h1>
+      <div class="top-right">
+        <span id="dsh-chip" class="chip chip-dim" title="dsh Web 服务(3080)">dsh 服务 · …</span>
+        <span class="chip" id="chip-cpu">CPU --</span>
+        <span class="chip" id="chip-mem">MEM --</span>
+        <span class="chip chip-mono" id="chip-clock">--:--:--</span>
+      </div>
+    </header>
+    <section class="content">
+      <div id="view-overview" class="view"></div>
+      <div id="view-console" class="view hidden"></div>
+      <div id="view-agents" class="view hidden"></div>
+      <div id="view-monitor" class="view hidden"></div>
+      <div id="view-logs" class="view hidden"></div>
+      <div id="view-plugins" class="view hidden"></div>
+      <div id="view-workspaces" class="view hidden"></div>
+      <div id="view-settings" class="view hidden"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast-root"></div>
+<div id="modal-root" class="hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

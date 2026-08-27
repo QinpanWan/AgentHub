@@ -1,0 +1,14 @@
+{
+  "name": "agent-hub",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AgentHub · 鸿蒙 PC 跨 Agent 管理平台(Codex / Claude / dsh)",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node test/self-test.js",
+    "test:http": "node test/self-test.js --http"
+  }
+}

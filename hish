@@ -1,0 +1,196 @@
+#!/bin/sh
+# ============================================================
+# AgentHub · HiShell 部署/启动脚本 (鸿蒙 PC)
+# 用法: sh hish <deploy|start|stop|restart|status|log|test|help>
+#   环境变量: HUB_PORT(默认8899) HUB_NODE(node路径) HUB_LOG
+# ============================================================
+set -u
+
+# —— 解析真实路径(支持经软链调用,如 ~/.local/bin/hish) ——
+SELF="$0"
+while [ -h "$SELF" ]; do
+  _LS=$(ls -ld "$SELF" 2>/dev/null)
+  _LINK=$(expr "$_LS" : '.*-> \(.*\)$')
+  case "$_LINK" in
+    /*) SELF="$_LINK" ;;
+    *) SELF="$(dirname "$SELF")/$_LINK" ;;
+  esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
+HUB_DIR="$SCRIPT_DIR"
+HOST=127.0.0.1
+PORT="${HUB_PORT:-8899}"
+PID_FILE="$HUB_DIR/data/hub.pid"
+LOG_FILE="${HUB_LOG:-$HUB_DIR/data/hub.log}"
+
+# —— 定位 node ——
+find_node() {
+  if [ -n "${HUB_NODE:-}" ] && [ -x "$HUB_NODE" ]; then echo "$HUB_NODE"; return; fi
+  if command -v node >/dev/null 2>&1; then echo "node"; return; fi
+  for d in /data/service/hnp/node.org/*/bin; do
+    if [ -x "$d/node" ]; then echo "$d/node"; return; fi
+  done
+  echo ""
+}
+
+# —— 健康检查(用 node 自带 http,不依赖 curl) ——
+health() {
+  NODE_BIN="$1"
+  PORT="$PORT" "$NODE_BIN" -e '
+    var http = require("http");
+    var req = http.get({ host: "127.0.0.1", port: Number(process.env.PORT || 8899), path: "/api/health", timeout: 2000 }, function (res) {
+      process.exit(res.statusCode === 200 ? 0 : 1);
+    });
+    req.on("error", function () { process.exit(1); });
+    setTimeout(function () { try { req.destroy(); } catch (e) {} process.exit(1); }, 2000);
+  ' 2>/dev/null
+}
+
+is_running() {
+  [ -f "$PID_FILE" ] || return 1
+  pid=$(cat "$PID_FILE" 2>/dev/null)
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+cmd_deploy() {
+  NODE_BIN=$(find_node)
+  if [ -z "$NODE_BIN" ]; then
+    echo "hish: 未找到 node,可设置 HUB_NODE 指定路径"
+    exit 1
+  fi
+  echo "hish: node = $NODE_BIN ($("$NODE_BIN" --version 2>/dev/null))"
+  mkdir -p "$HUB_DIR/data/logs" "$HUB_DIR/data/backups"
+  if [ -f "$HUB_DIR/assets/harmony-headless.patch.yml" ]; then
+    echo "hish: headless 适配补丁 OK"
+  else
+    echo "hish: 警告 缺少 assets/harmony-headless.patch.yml,dsh 任务将不可用"
+  fi
+  if [ -f "$HUB_DIR/server/index.js" ]; then
+    echo "hish: 服务端文件 OK"
+  else
+    echo "hish: 错误 缺少 server/index.js"
+    exit 1
+  fi
+  echo "hish: 部署检查完成。下一步:"
+  echo "hish:   sh hish start      # 启动"
+  echo "hish:   sh hish status     # 状态"
+  echo "hish:   浏览器访问 http://$HOST:$PORT"
+}
+
+cmd_start() {
+  NODE_BIN=$(find_node)
+  if [ -z "$NODE_BIN" ]; then echo "hish: 未找到 node(可设置 HUB_NODE)"; exit 1; fi
+  if is_running; then
+    echo "hish: AgentHub 已在运行 (pid $(cat "$PID_FILE" 2>/dev/null))"
+    return 0
+  fi
+  mkdir -p "$HUB_DIR/data/logs" "$HUB_DIR/data/backups"
+  cd "$HUB_DIR" || { echo "hish: 无法进入 $HUB_DIR"; exit 1; }
+  HUB_PORT="$PORT" nohup "$NODE_BIN" server/index.js >> "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+  i=0
+  while [ $i -lt 20 ]; do
+    if health "$NODE_BIN"; then
+      echo "hish: AgentHub 已启动 → http://$HOST:$PORT (pid $(cat "$PID_FILE"))"
+      return 0
+    fi
+    i=$((i + 1)); sleep 1
+  done
+  echo "hish: 启动失败,最近日志:"
+  tail -n 10 "$LOG_FILE" 2>/dev/null
+  exit 1
+}
+
+cmd_stop() {
+  if [ -f "$PID_FILE" ]; then
+    pid=$(cat "$PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null
+      i=0
+      while [ $i -lt 6 ] && kill -0 "$pid" 2>/dev/null; do sleep 1; i=$((i + 1)); done
+      kill -9 "$pid" 2>/dev/null
+      echo "hish: 已停止 (pid $pid)"
+    else
+      echo "hish: 未在运行"
+    fi
+    rm -f "$PID_FILE"
+  else
+    echo "hish: 未在运行"
+  fi
+  # 兜底:按启动命令匹配清理
+  ps -ef 2>/dev/null | grep "$HUB_DIR/server/index.js" | grep -v grep | awk '{print $2}' | while read -r p; do
+    [ -n "$p" ] && kill "$p" 2>/dev/null
+  done
+  return 0
+}
+
+cmd_restart() {
+  cmd_stop
+  sleep 1
+  cmd_start
+}
+
+cmd_status() {
+  NODE_BIN=$(find_node)
+  if is_running; then
+    pid=$(cat "$PID_FILE" 2>/dev/null)
+    if health "$NODE_BIN"; then
+      echo "hish: 状态 = 运行中 (pid $pid) · http://$HOST:$PORT · 健康检查 OK"
+    else
+      echo "hish: 状态 = 进程存活 (pid $pid) 但健康检查失败(端口可能被占用)"
+    fi
+  else
+    echo "hish: 状态 = 未运行"
+  fi
+  if [ -f "$LOG_FILE" ]; then
+    echo "hish: --- 最近日志 ---"
+    tail -n 5 "$LOG_FILE" 2>/dev/null
+  fi
+}
+
+cmd_log() {
+  if [ ! -f "$LOG_FILE" ]; then echo "hish: 日志不存在: $LOG_FILE"; exit 1; fi
+  if command -v tail >/dev/null 2>&1; then
+    tail -n 120 -f "$LOG_FILE"
+  else
+    NODE_BIN=$(find_node)
+    "$NODE_BIN" -e '
+      var fs = require("fs");
+      var f = process.argv[1];
+      var txt = fs.readFileSync(f, "utf8");
+      var lines = txt.split("\n").slice(-120);
+      console.log(lines.join("\n"));
+    ' "$LOG_FILE"
+  fi
+}
+
+cmd_test() {
+  NODE_BIN=$(find_node)
+  if [ -z "$NODE_BIN" ]; then echo "hish: 未找到 node"; exit 1; fi
+  cd "$HUB_DIR" || exit 1
+  HUB_PORT="$PORT" "$NODE_BIN" test/self-test.js
+}
+
+cmd_help() {
+  echo "AgentHub HiShell 脚本用法:"
+  echo "  sh hish deploy    首次部署检查(环境/补丁/目录)"
+  echo "  sh hish start     启动平台(幂等,带健康检查)"
+  echo "  sh hish stop      停止平台"
+  echo "  sh hish restart   重启平台"
+  echo "  sh hish status    查看状态"
+  echo "  sh hish log       跟踪日志"
+  echo "  sh hish test      运行自测(无需服务在线)"
+  echo "环境变量: HUB_PORT / HUB_NODE / HUB_LOG"
+}
+
+case "${1:-help}" in
+  deploy) cmd_deploy ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart) cmd_restart ;;
+  status) cmd_status ;;
+  log) cmd_log ;;
+  test) cmd_test ;;
+  help|-h|--help) cmd_help ;;
+  *) echo "hish: 未知命令 $1"; cmd_help; exit 1 ;;
+esac
