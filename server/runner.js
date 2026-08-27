@@ -8,10 +8,11 @@ const MAX_OUTPUT = 200000; // 单任务输出上限(字符)
 const MAX_EVENTS = 800;
 
 export class Runner {
-  constructor({ agents, logstore, config }) {
+  constructor({ agents, logstore, config, memory }) {
     this.agents = agents;
     this.logstore = logstore;
     this.config = config;
+    this.memory = memory || null;
     this.tasks = new Map();        // id -> task
     this.queues = new Map();       // agentId -> [taskId]
     this.running = new Map();      // agentId -> taskId
@@ -61,6 +62,7 @@ export class Runner {
     const arr = [...this.tasks.values()].slice(-50).map(t => ({
       id: t.id, agentId: t.agentId, model: t.model, effort: t.effort,
       prompt: (t.prompt || '').slice(0, 500),
+      useMemory: t.useMemory !== false,
       status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, finishedAt: t.finishedAt,
       exitCode: t.exitCode, error: t.error ? String(t.error).slice(0, 300) : null,
       output: (t.output || '').slice(-5000)
@@ -68,7 +70,7 @@ export class Runner {
     try { fs.writeFileSync(TASKS_FILE, JSON.stringify(arr, null, 2)); } catch { /* ignore */ }
   }
 
-  submit({ agentId, model, effort, prompt }) {
+  submit({ agentId, model, effort, prompt, useMemory }) {
     if (!agentId || !this.agents.get(agentId)) throw new Error(`未知 Agent:${agentId}`);
     const agent = this.agents.get(agentId);
     if (!agent.enabled()) throw new Error(`${agent.name} 已停用,请先在 Agent 管理页开启`);
@@ -86,6 +88,8 @@ export class Runner {
       status: 'queued', createdAt: Date.now(), startedAt: null, finishedAt: null,
       exitCode: null, error: null, output: '', events: [],
       maxMinutes: this.config.maxTaskMinutes || 30,
+      useMemory: useMemory !== false, // 是否把共享上下文/记忆注入 prompt
+      injected: null,                // 注入后记录(供详情查看)
       _seq: 0 // 事件序号(SSE 重连重放去重用)
     };
     this.tasks.set(task.id, task);
@@ -168,7 +172,16 @@ export class Runner {
     let cmd, args, cwd, env;
     try {
       cmd = agent.cmd();
-      args = agent.buildArgs(task.model, task.effort, task.prompt);
+      // 团队共享上下文/记忆注入:仅在任务允许且配置开启时合并,原始 prompt 保留用于展示
+      let effectivePrompt = task.prompt;
+      if (task.useMemory !== false && this.memory && (this.config.memory?.inject !== false)) {
+        const composed = this.memory.composePrompt(task.prompt, { agent: task.agentId });
+        if (composed !== task.prompt) {
+          effectivePrompt = composed;
+          task.injected = { chars: composed.length - String(task.prompt).length, truncated: composed.length > 12000 };
+        }
+      }
+      args = agent.buildArgs(task.model, task.effort, effectivePrompt);
       cwd = agent.cwd();
       env = { ...process.env, ...agent.buildEnv() };
     } catch (e) {

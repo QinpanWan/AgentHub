@@ -8,6 +8,7 @@
 
 - 纯 Node 实现，**零 npm 依赖**（仅内置模块），无原生二进制
 - Web UI 商务简约风，无框架，开箱即用
+- 团队共享上下文与共享记忆：提交任务自动注入相关上下文、按标签/关键词召回长期记忆
 - 完整生命周期命令：安装 / 启动 / 健康检查 / 修复 / 卸载一条龙
 - 运行时：Node ≥ 18（本机实测 v22.7.0）
 - 服务：`127.0.0.1:8899`（可用 `HUB_PORT` 覆盖）
@@ -110,6 +111,7 @@ hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
 │  ├── logstore   环形日志 + stderr 错误模式识别 + 落盘 data/logs/                   │
 │  ├── agents     codex / claude / dsh 执行器(探测·启停·模型/强度映射)              │
 │  └── plugins    dsh 插件(plugins-src)与 Skills 扫描·启停(带备份)                  │
+│  └── memory     团队共享上下文 + 共享记忆(CRUD/召回/prompt 注入,落盘 data/memory) │
 │        │                                                                          │
 │        ├──→ codex exec (DeepSeek 直连)                                            │
 │        ├──→ claude -p (未安装时优雅降级)                                          │
@@ -150,7 +152,7 @@ hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
 | GET | `/api/monitor?n=` | 系统与逐 Agent 历史序列 |
 | GET | `/api/logs?agent=&limit=` | 日志 |
 | GET/DELETE | `/api/errors` | 报错列表/清空 |
-| POST | `/api/tasks` | 提交任务 `{agentId, model, effort, prompt}` |
+| POST | `/api/tasks` | 提交任务 `{agentId, model, effort, prompt, useMemory}` |
 | GET | `/api/tasks` `/api/tasks/:id` | 任务列表/详情 |
 | GET | `/api/tasks/:id/stream` | SSE 事件流(`queued/started/chunk/done/failed/cancelled/end`) |
 | POST | `/api/tasks/:id/cancel` | 取消 |
@@ -159,6 +161,14 @@ hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
 | POST | `/api/plugins/:id/toggle` | 启停 dsh 插件(需 `confirm:true`,自动备份,重启 dsh 生效) |
 | POST | `/api/skills/:id/toggle` | 技能开关(平台侧) |
 | GET/POST | `/api/settings` | 配置读写 |
+| GET/POST | `/api/memory` | 共享记忆列表/新增(`?q=&tag=&agent=` 检索) |
+| PUT/DELETE | `/api/memory/:id` | 更新/删除单条记忆 |
+| POST | `/api/memory/:id/pin` | 记忆置顶/取消置顶 |
+| GET/POST | `/api/memory/contexts` | 共享上下文列表/新增 |
+| PUT/DELETE | `/api/memory/contexts/:id` | 更新/删除共享上下文 |
+| POST | `/api/memory/contexts/:id/pin` | 上下文置顶/取消置顶 |
+| POST | `/api/memory/recall` | 按 query 召回相关记忆 `{query, agent, limit}` |
+| POST | `/api/memory/preview` | 预览某 prompt 将注入的共享内容 |
 | GET | `/api/dsh/service` | dsh Web(3080)服务状态 |
 | POST | `/api/dsh/start\|stop\|restart` | dsh Web 服务控制 |
 
@@ -166,6 +176,17 @@ hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
 
 - 默认配置内置在 `server/config.js`；用户覆盖写入 `data/config.json`（设置页修改后自动保存）。
 - 数据目录：`data/`（配置、日志、任务历史、备份）。
+
+## 共享记忆与共享上下文
+
+「共享记忆」页（侧边栏 > 共享记忆）用于维护两类团队共享资源：
+
+- **共享上下文**：团队共同约定/事实/结论，提交任务时自动拼到 prompt 前奏。可用标题、标签、来源 Agent、置顶；置顶与最近更新的靠前注入。
+- **共享记忆**：长期沉淀的决策、踩坑、关键片段，按标签与关键词召回。标注重要度与来源 Agent，可置顶。
+
+默认开启自动注入（`memory.inject=true`），可在「设置」页关闭或调整注入上限/召回条数。任务控制台也有「附带共享上下文」开关，单次任务可临时关闭。任务详情保留原始 prompt，注入仅影响实际发给执行的 Agent。
+
+数据落盘于 `data/memory.json`。
 
 ## 鸿蒙适配要点（实测沉淀）
 

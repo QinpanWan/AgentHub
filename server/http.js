@@ -17,8 +17,8 @@ const MIME = {
   '.md': 'text/plain; charset=utf-8'
 };
 
-export function createServer({ config, logstore, monitor, agents, runner, plugins, workspaces }) {
-  const state = { config, logstore, monitor, agents, runner, plugins, workspaces };
+export function createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory }) {
+  const state = { config, logstore, monitor, agents, runner, plugins, workspaces, memory };
 
   const server = http.createServer((req, res) => {
     try {
@@ -47,7 +47,7 @@ async function handle(req, res, s) {
 }
 
 async function handleApi(req, res, s, method, p, u) {
-  const { config, logstore, monitor, agents, runner, plugins, workspaces } = s;
+  const { config, logstore, monitor, agents, runner, plugins, workspaces, memory } = s;
   const seg = p.split('/').filter(Boolean); // ['api', ...]
 
   // —— 健康检查 ——
@@ -85,7 +85,9 @@ async function handleApi(req, res, s, method, p, u) {
         tasks: runner.counts(),
         errors: logstore.errorCount(),
         plugins: plugins.listDshPlugins().length,
-        skills: plugins.listSkills().length
+        skills: plugins.listSkills().length,
+        memories: memory ? memory.stats().memories : 0,
+        shareContexts: memory ? memory.stats().contexts : 0
       },
       dshService: dsh,
       config: { pollMs: config.pollMs, maxTaskMinutes: config.maxTaskMinutes, queueLimit: config.queueLimit, port: config.port }
@@ -180,7 +182,8 @@ async function handleApi(req, res, s, method, p, u) {
         agentId: body.agentId,
         model: body.model || 'auto',
         effort: body.effort || 'medium',
-        prompt: body.prompt
+        prompt: body.prompt,
+        useMemory: body.useMemory
       });
       return sendJson(res, { ok: true, task }, 201);
     } catch (e) {
@@ -253,6 +256,13 @@ async function handleApi(req, res, s, method, p, u) {
       if (body.workspaces && Array.isArray(body.workspaces.roots)) {
         patch.workspaces = { roots: body.workspaces.roots.map(String).slice(0, 10) };
       }
+      if (body.memory && typeof body.memory === 'object') {
+        patch.memory = { ...config.memory };
+        if (typeof body.memory.inject === 'boolean') patch.memory.inject = body.memory.inject;
+        if (body.memory.maxContextChars) patch.memory.maxContextChars = Number(body.memory.maxContextChars);
+        if (body.memory.recallLimit) patch.memory.recallLimit = Number(body.memory.recallLimit);
+        if (body.memory.maxInjectedChars) patch.memory.maxInjectedChars = Number(body.memory.maxInjectedChars);
+      }
       if (body.agents && typeof body.agents === 'object') {
         patch.agents = {};
         for (const id of ['codex', 'claude', 'dsh']) {
@@ -311,6 +321,89 @@ async function handleApi(req, res, s, method, p, u) {
     const file = u.searchParams.get('path') || '';
     try { return sendJson(res, { file: workspaces.preview(file) }); }
     catch (e) { return sendErr(res, 400, e.message); }
+  }
+
+  // —— 共享记忆 / 共享上下文 ——
+  if (p === '/api/memory' && method === 'GET') {
+    const q = u.searchParams.get('q') || undefined;
+    const tag = u.searchParams.get('tag') || undefined;
+    const agent = u.searchParams.get('agent') || undefined;
+    const limit = Number(u.searchParams.get('limit') || 100);
+    return sendJson(res, { stats: memory.stats(), memories: memory.listMemory({ q, tag, agent, limit }) });
+  }
+  if (p === '/api/memory' && method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const mem = memory.addMemory(body);
+      logstore.push('memory', 'info', `[memory] 新增记忆 ${mem.id}`);
+      return sendJson(res, { ok: true, memory: mem }, 201);
+    } catch (e) { return sendErr(res, 400, e.message); }
+  }
+  if (p === '/api/memory/contexts' && method === 'GET') {
+    return sendJson(res, { contexts: memory.listContexts() });
+  }
+  if (p === '/api/memory/contexts' && method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const ctx = memory.addContext(body);
+      logstore.push('memory', 'info', `[memory] 新增共享上下文 ${ctx.id}`);
+      return sendJson(res, { ok: true, context: ctx }, 201);
+    } catch (e) { return sendErr(res, 400, e.message); }
+  }
+  if (p === '/api/memory/recall' && method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const rec = memory.recall(body.query || body.q || '', { agent: body.agent, limit: Number(body.limit || 6) });
+      return sendJson(res, { ok: true, memories: rec });
+    } catch (e) { return sendErr(res, 400, e.message); }
+  }
+  if (p === '/api/memory/preview' && method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    const prompt = String(body.prompt || '');
+    const composed = memory.composePrompt(prompt, { agent: body.agent });
+    return sendJson(res, { ok: true, base: prompt, composed, injected: composed !== prompt });
+  }
+
+  let mm = p.match(/^\/api\/memory\/contexts\/([a-f0-9-]+)$/);
+  if (mm && method === 'PUT') {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const ctx = memory.updateContext(mm[1], body);
+      if (!ctx) return sendErr(res, 404, '上下文不存在');
+      return sendJson(res, { ok: true, context: ctx });
+    } catch (e) { return sendErr(res, 400, e.message); }
+  }
+  if (mm && method === 'DELETE') {
+    return sendJson(res, { ok: memory.deleteContext(mm[1]) });
+  }
+  mm = p.match(/^\/api\/memory\/contexts\/([a-f0-9-]+)\/pin$/);
+  if (mm && method === 'POST') {
+    const ctx = memory.toggleContextPin(mm[1]);
+    if (!ctx) return sendErr(res, 404, '上下文不存在');
+    return sendJson(res, { ok: true, context: ctx });
+  }
+  mm = p.match(/^\/api\/memory\/([a-f0-9-]+)$/);
+  if (mm && method === 'GET') {
+    const mem = memory.getMemory(mm[1]);
+    if (!mem) return sendErr(res, 404, '记忆不存在');
+    return sendJson(res, { memory: mem });
+  }
+  if (mm && method === 'PUT') {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const mem = memory.updateMemory(mm[1], body);
+      if (!mem) return sendErr(res, 404, '记忆不存在');
+      return sendJson(res, { ok: true, memory: mem });
+    } catch (e) { return sendErr(res, 400, e.message); }
+  }
+  if (mm && method === 'DELETE') {
+    return sendJson(res, { ok: memory.deleteMemory(mm[1]) });
+  }
+  mm = p.match(/^\/api\/memory\/([a-f0-9-]+)\/pin$/);
+  if (mm && method === 'POST') {
+    const mem = memory.toggleMemoryPin(mm[1]);
+    if (!mem) return sendErr(res, 404, '记忆不存在');
+    return sendJson(res, { ok: true, memory: mem });
   }
 
   sendErr(res, 404, `未知接口:${p}`);

@@ -131,12 +131,12 @@ function drawSpark(canvas, data, color = '#a4713f', maxV) {
 // ================= 状态 =================
 const state = {
   status: null, monitor: null, view: 'overview',
-  console: { agent: 'codex', model: 'auto', effort: 'medium', taskId: null, es: null, messages: [], submitting: false },
+  console: { agent: 'codex', model: 'auto', effort: 'medium', taskId: null, es: null, messages: [], submitting: false, useMemory: true },
   logsTab: 'logs', logsAgent: 'all',
   timers: []
 };
 
-const TITLES = { overview: '概览', console: '任务控制台', agents: 'Agent 管理', monitor: '运行监控', logs: '日志与报错', plugins: '插件与技能', workspaces: '工作区', settings: '设置' };
+const TITLES = { overview: '概览', console: '任务控制台', agents: 'Agent 管理', monitor: '运行监控', logs: '日志与报错', plugins: '插件与技能', workspaces: '工作区', memory: '共享记忆', settings: '设置' };
 
 // 设置页:各 Agent 预设模型清单与提供商选项
 const PRESET_MODELS = {
@@ -170,6 +170,7 @@ function loadView(view) {
     else if (view === 'logs') { renderLogsView(); refreshLogs(); state._viewTimer = setInterval(refreshLogs, 3000); }
     else if (view === 'plugins') { refreshPlugins(); }
     else if (view === 'workspaces') { renderWorkspaces(); }
+    else if (view === 'memory') { renderMemory(); }
     else if (view === 'console') {
       refreshTaskList();
       if (state.status && Array.isArray(state.status.agents) && state.status.agents.length) {
@@ -304,7 +305,7 @@ function renderOverview(d) {
         <div class="mt8 small muted">内存 ${fmtBytes(sys.memUsed || 0)} / ${fmtBytes(sys.memTotal || 0)} · 已运行 ${fmtDur((sys.uptime || 0) * 1000)}</div>
       </div>
       <div class="card">
-        <div class="card-title">Agent 状态 <span class="sub">${d.counts.plugins} 插件 · ${d.counts.skills} 技能</span></div>
+        <div class="card-title">Agent 状态 <span class="sub">${d.counts.plugins} 插件 · ${d.counts.skills} 技能 · ${d.counts.memories || 0} 记忆</span></div>
         <table>
           <tr><th>Agent</th><th>状态</th><th>进程占用</th><th>当前活动</th></tr>
           ${agents.map(a => `
@@ -402,6 +403,9 @@ function initConsoleForm() {
             <button data-action="set-effort" data-v="medium" class="${state.console.effort === 'medium' ? 'sel' : ''}">中</button>
             <button data-action="set-effort" data-v="high" class="${state.console.effort === 'high' ? 'sel' : ''}">高</button>
           </div>
+          <label class="inline" title="把团队共享上下文与历史记忆注入本次任务 prompt">
+            <input type="checkbox" id="f-memory" ${state.console.useMemory ? 'checked' : ''}> 附带共享上下文
+          </label>
           <button class="btn btn-sm" data-action="oneclick" id="btn-inspect">一键巡检</button>
           <span class="muted small" id="console-hint"></span>
         </div>
@@ -424,6 +428,8 @@ function initConsoleForm() {
       $('#f-prompt').placeholder = `给 ${a ? a.name : ''} 的消息:直接写下要它做的事…(Ctrl+Enter 发送)`;
     });
     $('#f-model').addEventListener('change', e => { state.console.model = e.target.value; });
+    const memBox = $('#f-memory');
+    if (memBox) memBox.addEventListener('change', () => { state.console.useMemory = memBox.checked; });
     $('#f-prompt').addEventListener('keydown', e => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitTask(); }
     });
@@ -507,7 +513,7 @@ async function submitTask() {
   if (a && (a.permissionMode || 'auto') === 'confirm') {
     if (state.console.pendingConfirm) return toast('已有待确认的发送,请先处理', 'err');
     const sysId = 's' + Date.now();
-    state.console.pendingConfirm = { agentId, model, effort, prompt, sysId, agentName: a.name };
+    state.console.pendingConfirm = { agentId, model, effort, prompt, sysId, agentName: a.name, useMemory: state.console.useMemory };
     const area = $('#chat-area');
     if (area) {
       const empty = area.querySelector('.chat-empty');
@@ -528,10 +534,10 @@ async function submitTask() {
     }
     return;
   }
-  await sendTask({ agentId, model, effort, prompt });
+  await sendTask({ agentId, model, effort, prompt, useMemory: state.console.useMemory });
 }
 
-async function sendTask({ agentId, model, effort, prompt }) {
+async function sendTask({ agentId, model, effort, prompt, useMemory }) {
   if (state.console.submitting) return toast('正在发送,请稍候', 'err');
   const a = ((state.status && state.status.agents) || []).find(x => x.id === agentId);
   state.console.submitting = true;
@@ -542,7 +548,7 @@ async function sendTask({ agentId, model, effort, prompt }) {
   appendMsgToDom(agentMsg);
   $('#f-prompt').value = '';
   try {
-    const d = await api('/api/tasks', { method: 'POST', body: { agentId, model, effort, prompt } });
+    const d = await api('/api/tasks', { method: 'POST', body: { agentId, model, effort, prompt, useMemory } });
     agentMsg.taskId = d.task.id;
     state.console.taskId = d.task.id;
     $('#btn-cancel').classList.remove('hidden');
@@ -1014,6 +1020,264 @@ function wsCopy(path) {
   ta.remove();
 }
 
+// ================= 共享记忆 =================
+function agentOptions(sel, idBase) {
+  const agents = (state.status && state.status.agents) || [];
+  const opts = agents.map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+  return `<select id="${esc(idBase)}-agent" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px;background:var(--card)">
+    <option value="">全部 Agent</option>${opts}</select>`;
+}
+
+async function renderMemory() {
+  const el = $('#view-memory');
+  if (!el) return;
+  try {
+    const [m, c] = await Promise.all([api('/api/memory?limit=120'), api('/api/memory/contexts')]);
+    state.memory = { list: m.memories || [], contexts: c.contexts || [], stats: m.stats || {}, q: state.memory?.q || '', tag: state.memory?.tag || '' };
+    const st = state.memory.stats;
+    el.innerHTML = `
+      <div class="grid grid-4">
+        <div class="stat-card"><div class="stat-num accent">${st.contexts || 0}</div><div class="stat-label">共享上下文块</div></div>
+        <div class="stat-card"><div class="stat-num accent">${st.memories || 0}</div><div class="stat-label">共享记忆条数</div></div>
+        <div class="stat-card"><div class="stat-num ${(st.pinnedContexts + st.pinnedMemories) > 0 ? 'accent' : ''}">${(st.pinnedContexts || 0) + (st.pinnedMemories || 0)}</div><div class="stat-label">置顶条目</div></div>
+        <div class="stat-card"><div class="stat-num">${st.tags || 0}</div><div class="stat-label">标签总数</div></div>
+      </div>
+
+      <div class="grid grid-2 mt16">
+        <div class="card">
+          <div class="card-title">共享上下文 <span class="sub">提交任务时自动注入 prompt</span></div>
+          <div class="field"><label>标题(可选)</label><input type="text" id="ctx-title" placeholder="例如:项目架构约定"></div>
+          <div class="field"><label>内容(团队共同约定 / 事实 / 结论)</label><textarea id="ctx-content" placeholder="团队都需要知道的一段共享上下文。置顶的靠前注入。"></textarea></div>
+          <div class="field"><label>标签(逗号分隔)</label><input type="text" id="ctx-tags" placeholder="架构, 部署, 约定"></div>
+          <div class="flex">
+            <div class="field" style="flex:1;margin-bottom:0"><label>范围</label>${agentOptions(state.memory._selAgent || '', 'ctx')}</div>
+            <div class="field" style="margin-bottom:0"><label>置顶</label><input type="checkbox" id="ctx-pinned"></div>
+          </div>
+          <div class="flex mt12">
+            <button class="btn btn-primary btn-sm" data-action="ctx-save">新增上下文</button>
+            <button class="btn btn-ghost btn-sm hidden" data-action="ctx-cancel-edit" id="ctx-cancel">取消编辑</button>
+            <span class="muted small" id="ctx-hint"></span>
+          </div>
+          <div id="ctx-list" class="mt12"></div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title">共享记忆 <span class="sub">长期要点 · 按关键词/标签召回</span></div>
+            <div class="field"><label>记忆内容</label><textarea id="mem-content" placeholder="记录一次决策、踩坑结论、关键片段…提交任务时可被召回"></textarea></div>
+            <div class="field"><label>标签(逗号分隔)</label><input type="text" id="mem-tags" placeholder="鸿蒙, codex, 坑"></div>
+            <div class="flex">
+              <div class="field" style="flex:1;margin-bottom:0"><label>来源 Agent</label>${agentOptions(state.memory._memAgent || '', 'mem')}</div>
+              <div class="field" style="width:110px;margin-bottom:0"><label>重要度</label>
+                <select id="mem-importance"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option></select>
+              </div>
+              <div class="field" style="margin-bottom:0"><label>置顶</label><input type="checkbox" id="mem-pinned"></div>
+            </div>
+            <div class="flex mt12">
+              <button class="btn btn-primary btn-sm" data-action="mem-save">新增记忆</button>
+              <button class="btn btn-ghost btn-sm hidden" data-action="mem-cancel-edit" id="mem-cancel">取消编辑</button>
+              <span class="muted small" id="mem-hint"></span>
+            </div>
+            <div class="flex mt16" style="align-items:center">
+              <input type="text" id="mem-q" placeholder="搜索记忆…" value="${esc(state.memory.q || '')}" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px;background:var(--card)">
+              <button class="btn btn-sm" data-action="mem-search">搜索</button>
+              <button class="btn btn-ghost btn-sm" data-action="mem-clear-search">清空</button>
+            </div>
+            <div id="mem-list" class="mt12"></div>
+          </div>
+
+          <div class="card mt16">
+            <div class="card-title">注入预览 <span class="sub">查看共享上下文将如何被拼进 prompt</span></div>
+            <div class="field"><label>试一个任务 prompt</label><textarea id="pv-prompt" placeholder="例如:给 Codex 布置修改任务…" style="min-height:70px"></textarea></div>
+            <div class="flex"><div class="field" style="flex:1;margin-bottom:0"><label>目标 Agent</label>${agentOptions(state.memory._pvAgent || '', 'pv')}</div><button class="btn btn-sm btn-primary" data-action="mem-preview" style="height:38px">预览注入</button></div>
+            <pre id="pv-out" class="log-area mt12" style="height:180px;white-space:pre-wrap;display:none"></pre>
+          </div>
+        </div>
+      </div>`;
+    renderContextList();
+    renderMemoryList();
+  } catch (e) {
+    el.innerHTML = `<div class="card"><div class="small" style="color:var(--red)">加载失败:${esc(e.message)}</div></div>`;
+  }
+}
+
+function renderContextList() {
+  const box = $('#ctx-list');
+  if (!box) return;
+  const list = state.memory?.contexts || [];
+  box.innerHTML = list.length ? list.map(c => `
+    <div class="mem-item">
+      <div class="mem-line">
+        <b>${esc(c.title || '(无标题)')}</b>
+        ${c.pinned ? '<span class="badge badge-warn">⭐置顶</span>' : ''}
+        ${c.agent ? `<span class="badge" style="color:var(--muted)">来自 ${esc(c.agent)}</span>` : ''}
+        <span class="small muted">${fmtDate(c.updatedAt)}</span>
+        <span class="flex" style="margin-left:auto">
+          <button class="btn btn-ghost btn-sm" data-action="ctx-pin" data-id="${c.id}">${c.pinned ? '取消置顶' : '置顶'}</button>
+          <button class="btn btn-ghost btn-sm" data-action="ctx-edit" data-id="${c.id}">编辑</button>
+          <button class="btn btn-ghost btn-sm" data-action="ctx-del" data-id="${c.id}">删除</button>
+        </span>
+      </div>
+      <div class="mem-content">${esc(c.content)}</div>
+      <div class="mem-tags">${(c.tags || []).map(t => `<span class="mchip">#${esc(t)}</span>`).join('') || '<span class="muted small">无标签</span>'}</div>
+    </div>`).join('') : '<div class="muted small">暂无共享上下文,添加一段团队约定吧。</div>';
+}
+
+function renderMemoryList() {
+  const box = $('#mem-list');
+  if (!box) return;
+  const list = state.memory?.list || [];
+  box.innerHTML = list.length ? list.map(m => `
+    <div class="mem-item">
+      <div class="mem-line">
+        <b style="color:var(--accent)">${'★'.repeat(m.importance || 0)}</b>
+        ${m.pinned ? '<span class="badge badge-warn">置顶</span>' : ''}
+        ${m.agent ? `<span class="badge" style="color:var(--muted)">${esc(m.agent)}</span>` : ''}
+        <span class="small muted">${fmtDate(m.updatedAt)}</span>
+        <span class="flex" style="margin-left:auto">
+          <button class="btn btn-ghost btn-sm" data-action="mem-pin" data-id="${m.id}">${m.pinned ? '取消置顶' : '置顶'}</button>
+          <button class="btn btn-ghost btn-sm" data-action="mem-edit" data-id="${m.id}">编辑</button>
+          <button class="btn btn-ghost btn-sm" data-action="mem-del" data-id="${m.id}">删除</button>
+        </span>
+      </div>
+      <div class="mem-content">${esc(m.content)}</div>
+      <div class="mem-tags">${(m.tags || []).map(t => `<span class="mchip">#${esc(t)}</span>`).join('') || ''}</div>
+      <div class="small muted">${m.source ? '来源 ' + esc(m.source) : ''}${m.hits ? ' · 召回 ' + m.hits + ' 次' : ''}</div>
+    </div>`).join('') : '<div class="muted small">暂无共享记忆。记录一条决策或踩坑,任务时会被自动召回。</div>';
+}
+
+function parseTags(el) { return (el.value || '').split(/[,，\s]+/).map(s => s.trim().replace(/^#/, '')).filter(Boolean); }
+async function refreshMemoryData() { renderMemory(); }
+
+async function refreshMemoryList() {
+  const box = $('#mem-list');
+  if (!box) return;
+  const q = state.memory?.q || '';
+  const tag = state.memory?.tag || '';
+  const p = new URLSearchParams({ limit: '120' });
+  if (q) p.set('q', q);
+  if (tag) p.set('tag', tag);
+  const d = await api('/api/memory?' + p.toString());
+  state.memory.list = d.memories || [];
+  state.memory.stats = d.stats || state.memory.stats;
+  renderMemoryList();
+}
+
+function resetContextForm() {
+  if (!state.memory) return;
+  state.memory._editingCtx = null;
+  if ($('#ctx-title')) $('#ctx-title').value = '';
+  if ($('#ctx-content')) $('#ctx-content').value = '';
+  if ($('#ctx-tags')) $('#ctx-tags').value = '';
+  if ($('#ctx-pinned')) $('#ctx-pinned').checked = false;
+  if ($('#ctx-cancel')) $('#ctx-cancel').classList.add('hidden');
+  const sb = document.querySelector('[data-action="ctx-save"]');
+  if (sb) sb.textContent = '新增上下文';
+  if ($('#ctx-hint')) $('#ctx-hint').textContent = '';
+}
+
+function fillContextForm(id) {
+  const c = (state.memory.contexts || []).find(x => x.id === id);
+  if (!c) return;
+  state.memory._editingCtx = id;
+  if ($('#ctx-title')) $('#ctx-title').value = c.title || '';
+  if ($('#ctx-content')) $('#ctx-content').value = c.content || '';
+  if ($('#ctx-tags')) $('#ctx-tags').value = (c.tags || []).join(', ');
+  if ($('#ctx-agent')) $('#ctx-agent').value = c.agent || '';
+  if ($('#ctx-pinned')) $('#ctx-pinned').checked = !!c.pinned;
+  const sb = document.querySelector('[data-action="ctx-save"]');
+  if (sb) sb.textContent = '保存修改';
+  if ($('#ctx-cancel')) $('#ctx-cancel').classList.remove('hidden');
+  if ($('#ctx-hint')) $('#ctx-hint').textContent = '正在编辑: ' + (c.title || c.id);
+}
+
+async function saveContext() {
+  const title = ($('#ctx-title') || {}).value?.trim() || '';
+  const content = ($('#ctx-content') || {}).value?.trim() || '';
+  const tags = parseTags($('#ctx-tags'));
+  const agent = ($('#ctx-agent') || {}).value || '';
+  const pinned = !!($('#ctx-pinned') || {}).checked;
+  if (!content) return toast('请填写上下文内容', 'err');
+  const body = { title, content, tags, agent, pinned };
+  const editing = state.memory && state.memory._editingCtx;
+  try {
+    if (editing) {
+      await api('/api/memory/contexts/' + editing, { method: 'PUT', body });
+      toast('已更新共享上下文', 'ok');
+    } else {
+      await api('/api/memory/contexts', { method: 'POST', body });
+      toast('已新增共享上下文', 'ok');
+    }
+    resetContextForm();
+    renderMemory();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function resetMemoryForm() {
+  if (!state.memory) return;
+  state.memory._editingMem = null;
+  if ($('#mem-content')) $('#mem-content').value = '';
+  if ($('#mem-tags')) $('#mem-tags').value = '';
+  if ($('#mem-agent')) $('#mem-agent').value = '';
+  if ($('#mem-importance')) $('#mem-importance').value = '3';
+  if ($('#mem-pinned')) $('#mem-pinned').checked = false;
+  if ($('#mem-cancel')) $('#mem-cancel').classList.add('hidden');
+  const sb = document.querySelector('[data-action="mem-save"]');
+  if (sb) sb.textContent = '新增记忆';
+  if ($('#mem-hint')) $('#mem-hint').textContent = '';
+}
+
+function fillMemoryForm(id) {
+  const m = (state.memory.list || []).find(x => x.id === id);
+  if (!m) return;
+  state.memory._editingMem = id;
+  if ($('#mem-content')) $('#mem-content').value = m.content || '';
+  if ($('#mem-tags')) $('#mem-tags').value = (m.tags || []).join(', ');
+  if ($('#mem-agent')) $('#mem-agent').value = m.agent || '';
+  if ($('#mem-importance')) $('#mem-importance').value = String(m.importance || 3);
+  if ($('#mem-pinned')) $('#mem-pinned').checked = !!m.pinned;
+  const sb = document.querySelector('[data-action="mem-save"]');
+  if (sb) sb.textContent = '保存修改';
+  if ($('#mem-cancel')) $('#mem-cancel').classList.remove('hidden');
+  if ($('#mem-hint')) $('#mem-hint').textContent = '正在编辑: ' + (m.id);
+}
+
+async function saveMemory() {
+  const content = ($('#mem-content') || {}).value?.trim() || '';
+  const tags = parseTags($('#mem-tags'));
+  const agent = ($('#mem-agent') || {}).value || '';
+  const importance = Number(($('#mem-importance') || {}).value || 3);
+  const pinned = !!($('#mem-pinned') || {}).checked;
+  if (!content) return toast('请填写记忆内容', 'err');
+  const body = { content, tags, agent, importance, pinned };
+  const editing = state.memory && state.memory._editingMem;
+  try {
+    if (editing) {
+      await api('/api/memory/' + editing, { method: 'PUT', body });
+      toast('已更新共享记忆', 'ok');
+    } else {
+      await api('/api/memory', { method: 'POST', body });
+      toast('已新增共享记忆', 'ok');
+    }
+    resetMemoryForm();
+    renderMemory();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function previewMemory() {
+  const prompt = ($('#pv-prompt') || {}).value?.trim() || '';
+  if (!prompt) return toast('先输入一个任务 prompt 再预览', 'err');
+  const agent = ($('#pv-agent') || {}).value || '';
+  try {
+    const d = await api('/api/memory/preview', { method: 'POST', body: { prompt, agent } });
+    const out = $('#pv-out');
+    if (out) {
+      out.style.display = '';
+      out.textContent = d.injected ? d.composed : '(当前没有可注入的共享内容,与原始 prompt 一致)';
+    }
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 // ================= 设置 =================
 async function loadSettings() {
   try {
@@ -1032,6 +1296,15 @@ async function loadSettings() {
             <div class="field"><label>任务排队上限</label><input type="number" id="s-queue" value="${cfg.queueLimit}"></div>
             <div class="field"><label>工作区根目录(逗号分隔,留空=默认 ~/WorkBuddy,~/dsh-kb)</label><input type="text" id="s-wsroots" value="${esc((((cfg.workspaces || {}).roots) || []).join(','))}"></div>
             <button class="btn btn-primary" data-action="save-settings">保存设置</button>
+          </div>
+          <div class="card mt16">
+            <div class="card-title">共享记忆 <span class="sub">任务注入设置</span></div>
+            <div class="field"><label><input type="checkbox" id="s-mem-inject" ${cfg.memory && cfg.memory.inject !== false ? 'checked' : ''}> 提交任务时自动注入共享上下文/相关记忆</label></div>
+            <div class="field"><label>共享上下文单次注入上限(字符)</label><input type="number" id="s-mem-context" value="${cfg.memory ? cfg.memory.maxContextChars : 3000}"></div>
+            <div class="field"><label>相关记忆单次召回条数</label><input type="number" id="s-mem-recall" value="${cfg.memory ? cfg.memory.recallLimit : 6}"></div>
+            <div class="field"><label>注入内容总长上限(字符)</label><input type="number" id="s-mem-max" value="${cfg.memory ? cfg.memory.maxInjectedChars : 6000}"></div>
+            <div class="small muted">共享上下文与记忆在「共享记忆」页维护;此处仅控制是否在提交任务时注入到 prompt。</div>
+            <button class="btn btn-primary mt12" data-action="save-settings">保存设置</button>
           </div>
           <div class="card mt16">
             <div class="card-title">dsh Web 服务(3080)</div>
@@ -1126,6 +1399,15 @@ async function saveSettings() {
   const poll = $('#s-poll'); if (poll) body.pollMs = Number(poll.value) || 2000;
   const to = $('#s-timeout'); if (to) body.maxTaskMinutes = Number(to.value) || 30;
   const wr = $('#s-wsroots'); if (wr) body.workspaces = { roots: wr.value.split(',').map(s => s.trim()).filter(Boolean) };
+  const mi = $('#s-mem-inject'); const mc = $('#s-mem-context'); const mr = $('#s-mem-recall'); const mm = $('#s-mem-max');
+  if (mi || mc || mr || mm) {
+    body.memory = {
+      inject: mi ? mi.checked : true,
+      maxContextChars: Number(mc ? mc.value : 3000) || 3000,
+      recallLimit: Number(mr ? mr.value : 6) || 6,
+      maxInjectedChars: Number(mm ? mm.value : 6000) || 6000
+    };
+  }
   for (const id of ['codex', 'claude', 'dsh']) {
     const enabled = document.querySelector(`[data-aid="${id}"][data-k="enabled"]`);
     const models = [...document.querySelectorAll(`#chips-${id} .mchip`)].map(c => c.dataset.model).filter(Boolean);
@@ -1264,6 +1546,41 @@ document.addEventListener('click', async e => {
         toast('已拒绝,任务未发送');
         break;
       }
+      case 'ctx-save': saveContext(); break;
+      case 'ctx-cancel-edit': resetContextForm(); break;
+      case 'ctx-pin': await api('/api/memory/contexts/' + id + '/pin', { method: 'POST' }); toast('已更新置顶'); renderMemory(); break;
+      case 'ctx-edit': fillContextForm(id); break;
+      case 'ctx-del': {
+        const ok = await confirmModal({ title: '删除共享上下文?', body: '删除后不再自动注入任务 prompt。', okText: '删除', danger: true });
+        if (!ok) break;
+        await api('/api/memory/contexts/' + id, { method: 'DELETE' });
+        toast('已删除共享上下文');
+        renderMemory();
+        break;
+      }
+      case 'mem-save': saveMemory(); break;
+      case 'mem-cancel-edit': resetMemoryForm(); break;
+      case 'mem-pin': await api('/api/memory/' + id + '/pin', { method: 'POST' }); toast('已更新置顶'); renderMemory(); break;
+      case 'mem-edit': fillMemoryForm(id); break;
+      case 'mem-del': {
+        const ok = await confirmModal({ title: '删除共享记忆?', body: '删除后任务时不再被召回。', okText: '删除', danger: true });
+        if (!ok) break;
+        await api('/api/memory/' + id, { method: 'DELETE' });
+        toast('已删除共享记忆');
+        renderMemory();
+        break;
+      }
+      case 'mem-search':
+        if (state.memory) { state.memory.q = ($('#mem-q').value || '').trim(); state.memory.tag = ''; }
+        refreshMemoryList();
+        break;
+      case 'mem-clear-search':
+        if (state.memory) { state.memory.q = ''; state.memory.tag = ''; }
+        if ($('#mem-q')) $('#mem-q').value = '';
+        refreshMemoryList();
+        break;
+      case 'mem-preview': previewMemory(); break;
+      case 'mem-refresh': renderMemory(); break;
       case 'ws-open': wsOpen(el.dataset.path); break;
       case 'ws-preview': wsPreview(el.dataset.path); break;
       case 'ws-copy': wsCopy(el.dataset.path); break;

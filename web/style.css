@@ -313,6 +313,18 @@ tbody tr:hover td { background: #faf5ea; }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(164,113,63,.25); border-top-color: var(--accent); border-radius: 50%; animation: rot .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
 @keyframes rot { to { transform: rotate(360deg); } }
 
+/* —— 共享记忆 —— */
+.inline { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.mem-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 10px; background: var(--bg-soft); }
+.mem-item:first-child { margin-top: 0; }
+.mem-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.mem-line .small { white-space: nowrap; }
+.mem-content { font-size: 12.8px; line-height: 1.62; color: var(--text); margin: 6px 0 4px; white-space: pre-wrap; word-break: break-word; }
+.mem-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+#view-memory select { flex: 1; }
+#view-memory .field select { min-width: 0; }
+#view-memory textarea { min-height: 78px; }
+
 @media (max-width: 1100px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .agent-grid, .plugin-grid, .grid-3, .console-wrap, .settings-grid { grid-template-columns: 1fr; }

@@ -6,6 +6,7 @@ import { Agents } from './agents.js';
 import { Runner } from './runner.js';
 import { Plugins } from './plugins.js';
 import { Workspaces } from './workspace.js';
+import { MemoryHub } from './memory.js';
 import { createServer } from './http.js';
 
 ensureDirs();
@@ -14,7 +15,8 @@ const config = loadConfig();
 const logstore = new LogStore();
 const monitor = new Monitor({ pollMs: config.pollMs, historySize: config.historySize });
 const agents = new Agents({ config, logstore, monitor });
-const runner = new Runner({ agents, logstore, config });
+const memory = new MemoryHub({ config });
+const runner = new Runner({ agents, logstore, config, memory });
 const plugins = new Plugins({ config, logstore });
 const workspaces = new Workspaces({ config });
 
@@ -30,7 +32,7 @@ process.on('unhandledRejection', (e) => {
   try { logstore.push('system', 'error', String(msg).slice(0, 500)); } catch { /* ignore */ }
 });
 
-const server = createServer({ config, logstore, monitor, agents, runner, plugins, workspaces });
+const server = createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory });
 
 monitor.start();
 agents.start();

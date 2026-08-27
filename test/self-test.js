@@ -42,6 +42,23 @@ async function l1() {
   t('错误识别(EPERM 模式)', ls.errorsList().some(e => e.line.includes('EPERM')));
   t('错误统计桶', ls.errorStats(24).length === 24);
 
+  // 2b. 共享记忆 / 共享上下文
+  console.log('  共享记忆/共享上下文:');
+  const { MemoryHub } = await import(path.join(ROOT, 'server', 'memory.js'));
+  const mh = new MemoryHub({ config: cfg });
+  const cid = mh.addContext({ title: '约定', content: '零 npm 依赖', tags: ['node', 'arch'], agent: 'codex', pinned: true });
+  const mid = mh.addMemory({ content: 'DeepSeek 需要自定义 CA', tags: ['deepseek', 'ca'], agent: 'codex', importance: 4, source: 'task:abc' });
+  t('新增共享上下文', mh.getContext(cid.id)?.title === '约定');
+  t('新增共享记忆', mh.getMemory(mid.id)?.importance === 4);
+  t('上下文置顶排序靠前', mh.listContexts()[0].pinned === true);
+  t('关键词召回', mh.recall('自定义 CA', { limit: 5 }).some(m => m.id === mid.id));
+  const composed = mh.composePrompt('配置 DeepSeek', { agent: 'codex' });
+  t('prompt 注入含共享上下文与任务', composed.includes('团队共享上下文') && composed.includes('【任务】'));
+  t('记忆更新', mh.updateMemory(mid.id, { importance: 5 }).importance === 5);
+  t('取消上下文置顶', mh.toggleContextPin(cid.id).pinned === false);
+  t('删除共享上下文', mh.deleteContext(cid.id) === true && !mh.getContext(cid.id));
+  t('删除共享记忆', mh.deleteMemory(mid.id) === true && !mh.getMemory(mid.id));
+
   // 3. 监控
   console.log('  监控:');
   const { Monitor } = await import(path.join(ROOT, 'server', 'monitor.js'));
@@ -129,6 +146,23 @@ async function l1() {
   runner3.cancel(recId + 'q');
   await sleep(300);
   try { fs.writeFileSync(TASKS_FILE, origTasks); } catch { /* ignore */ }
+
+  // 5b. Runner 注入共享上下文
+  console.log('  Runner 注入共享上下文:');
+  let capturedPrompt = null;
+  const captureAgent = {
+    id: 'cap', name: 'cap', available: true, taskId: null, lastActivityAt: 0,
+    enabled: () => true, ensureProbed() {},
+    cmd: () => 'node',
+    buildArgs: (m, e, p) => { capturedPrompt = p; return ['-e', 'process.exit(0)']; },
+    buildEnv: () => ({}), cwd: () => ROOT, timeoutMs: () => 30000
+  };
+  const injectCtx = mh.addContext({ title: '注入测试', content: 'ThisShouldBeInjected', tags: ['inject'], agent: 'cap' });
+  const runnerInj = new Runner({ agents: { get: () => captureAgent }, logstore: ls, config: { queueLimit: 5, maxTaskMinutes: 1 }, memory: mh });
+  const injTask = runnerInj.submit({ agentId: 'cap', model: 'auto', effort: 'low', prompt: 'do a thing', useMemory: true });
+  await waitTerminal(runnerInj, injTask.id, 15000);
+  t('Runner 注入共享上下文到 prompt', !!(capturedPrompt && capturedPrompt.includes('ThisShouldBeInjected') && capturedPrompt.includes('【任务】')), capturedPrompt ? capturedPrompt.slice(0, 80) : 'no capture');
+  mh.deleteContext(injectCtx.id);
 
   // 6. 插件扫描
   console.log('  插件/技能扫描:');

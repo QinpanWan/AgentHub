@@ -11,6 +11,7 @@ export const LOGS_DIR = path.join(DATA_DIR, 'logs');
 export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
+export const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
 export const ASSETS_DIR = path.join(ROOT, 'assets');
 export const HEADLESS_PATCH = path.join(ASSETS_DIR, 'harmony-headless.patch.yml');
 export const WEB_DIR = path.join(ROOT, 'web');
@@ -44,6 +45,12 @@ export function defaultConfig() {
     maxTaskMinutes: 30,    // 任务超时上限(分钟)
     queueLimit: 20,        // 单 Agent 排队上限
     workspaces: { roots: [] }, // 工作区根目录(空=默认 ~/WorkBuddy,~/dsh-kb)
+    memory: {              // 团队共享上下文与共享记忆
+      inject: true,        // 提交任务时自动注入共享上下文/相关记忆
+      maxContextChars: 3000, // 共享上下文单次注入上限(字符)
+      recallLimit: 6,      // 相关记忆单次召回条数
+      maxInjectedChars: 6000 // 注入内容总长上限(字符)
+    },
     agents: {
       codex: {
         enabled: true,
