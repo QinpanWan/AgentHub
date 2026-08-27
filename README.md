@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="AgentHub · 鸿蒙 PC 跨 Agent 管理平台" width="100%" />
+</p>
+
 # AgentHub · 鸿蒙 PC 跨 Agent 管理平台
 
 集中管理 **Codex / Claude / dsh** 三个 Agent 的轻量管理平台：实时资源与工作状况监控、报错收集、对话窗任务派发（选 Agent / 选模型 / 选思考强度）、Agent 启停、插件与技能管理。
