@@ -193,3 +193,7 @@ hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
 - Codex 鸿蒙移植方案：[Entity-Him/codex-harmonyos](https://github.com/Entity-Him/codex-harmonyos)（MIT）
 
 MIT License。
+
+## 更新记录
+
+- **v1.0**：v1.0 版本正式发布
