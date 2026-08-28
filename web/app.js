@@ -24,7 +24,7 @@ function activityHtml(a) {
 
 async function api(path, opts = {}) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || 10000);
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || 30000);
   try {
     const res = await fetch(path, {
       headers: { 'Content-Type': 'application/json' },
@@ -573,7 +573,7 @@ function openTaskStream(id, msg) {
     statusEl.innerHTML = `<span class="spin"></span>${esc(msg.agentName || msg.agentId)} 正在回复… <b class="chat-waited">已等待 0s</b>${msg.model && msg.model !== 'auto' ? ` · ${esc(msg.model)}` : ''}`;
     state.console._waitedTimer = setInterval(() => {
       const w = statusEl.querySelector('.chat-waited');
-      if (w) w.textContent = '已等待 ' + Math.round((Date.now() - t0) / 1000) + 's';
+      if (w) w.textContent = '已等待 ' + Math.round((Date.now() - t0) / 1000) + 's' + ((Date.now() - t0) > 90000 ? '(长时间无输出,可点停止)' : '');
     }, 1000);
   }
   let lastSeq = 0; // SSE 重连重放去重:跳过序号 ≤ 已处理的事件
@@ -658,7 +658,7 @@ async function oneClickInspect() {
   const btn = $('#btn-inspect');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>巡检中…'; }
   try {
-    const d = await api('/api/oneclick/inspect', { method: 'POST' });
+    const d = await api('/api/oneclick/inspect', { method: 'POST', timeoutMs: 300000 });
     const lines = d.results.map(r =>
       `${r.agentId}: ${r.ok ? '✅ OK' : '❌ FAIL'} ${r.ms != null ? '(' + fmtDur(r.ms) + ')' : ''} ${r.ok ? (r.snippet || '') : (r.error || '')}`
     );
@@ -666,7 +666,7 @@ async function oneClickInspect() {
     const box = $('#console-hint');
     if (box) box.innerHTML = '<b>巡检结果</b><br>' + lines.map(esc).join('<br>');
     refreshStatus();
-  } catch (e) { toast('巡检失败: ' + e.message, 'err'); }
+  } catch (e) { toast('巡检失败: ' + (e.name === 'AbortError' ? '请求超时,巡检较慢,请稍后重试' : e.message), 'err'); }
   if (btn) { btn.disabled = false; btn.innerHTML = '一键巡检'; }
 }
 
@@ -1032,8 +1032,8 @@ async function renderMemory() {
   const el = $('#view-memory');
   if (!el) return;
   try {
-    const [m, c] = await Promise.all([api('/api/memory?limit=120'), api('/api/memory/contexts')]);
-    state.memory = { list: m.memories || [], contexts: c.contexts || [], stats: m.stats || {}, q: state.memory?.q || '', tag: state.memory?.tag || '' };
+    const [m, c, mm] = await Promise.all([api('/api/memory?limit=120'), api('/api/memory/contexts'), api('/api/memory/memmd')]);
+    state.memory = { list: m.memories || [], contexts: c.contexts || [], stats: m.stats || {}, memmd: (mm && mm.memmd) || { exists: false, path: '', updatedAt: 0, sections: [] }, q: state.memory?.q || '', tag: state.memory?.tag || '' };
     const st = state.memory.stats;
     el.innerHTML = `
       <div class="grid grid-4">
@@ -1093,9 +1093,18 @@ async function renderMemory() {
             <pre id="pv-out" class="log-area mt12" style="height:180px;white-space:pre-wrap;display:none"></pre>
           </div>
         </div>
+      </div>
+
+      <div class="card mt16">
+        <div class="card-title">Agent 共享记忆 <span class="sub">~/MEMORY.md · Codex/Claude/dsh 对话中实时读写,此处直接展示</span>
+          <button class="btn btn-ghost btn-sm" data-action="memmd-refresh">刷新</button>
+        </div>
+        <div class="small muted">${state.memory.memmd.exists ? '文件更新时间: ' + fmtDate(state.memory.memmd.updatedAt) + ' · ' + esc(state.memory.memmd.path) : '未找到 ~/MEMORY.md(Agent 会在对话中创建并持续写入,刷新后自动出现)'}</div>
+        <div id="memmd-list" class="mt12"></div>
       </div>`;
     renderContextList();
     renderMemoryList();
+    renderMemMdList();
   } catch (e) {
     el.innerHTML = `<div class="card"><div class="small" style="color:var(--red)">加载失败:${esc(e.message)}</div></div>`;
   }
@@ -1144,6 +1153,24 @@ function renderMemoryList() {
       <div class="mem-tags">${(m.tags || []).map(t => `<span class="mchip">#${esc(t)}</span>`).join('') || ''}</div>
       <div class="small muted">${m.source ? '来源 ' + esc(m.source) : ''}${m.hits ? ' · 召回 ' + m.hits + ' 次' : ''}</div>
     </div>`).join('') : '<div class="muted small">暂无共享记忆。记录一条决策或踩坑,任务时会被自动召回。</div>';
+}
+
+function renderMemMdList() {
+  const box = $('#memmd-list');
+  if (!box) return;
+  const mm = state.memory?.memmd || {};
+  const sections = mm.sections || [];
+  box.innerHTML = sections.length ? sections.map(sec => `
+    <div class="mem-item">
+      <div class="mem-line"><b style="color:var(--accent)">## ${esc(sec.title)}</b></div>
+      <div class="mem-content" style="white-space:pre-wrap">${esc(sec.content || '(空)')}</div>
+    </div>`).join('') : '<div class="muted small">暂无内容。Agent 在对话中把要点写入 ~/MEMORY.md 后,这里会自动显示。</div>';
+}
+
+async function refreshMemMd() {
+  const d = await api('/api/memory/memmd');
+  if (state.memory) state.memory.memmd = (d && d.memmd) || { exists: false, path: '', updatedAt: 0, sections: [] };
+  renderMemMdList();
 }
 
 function parseTags(el) { return (el.value || '').split(/[,，\s]+/).map(s => s.trim().replace(/^#/, '')).filter(Boolean); }
@@ -1481,7 +1508,7 @@ document.addEventListener('click', async e => {
         refreshStatus();
         break;
       }
-      case 'agent-probe': await api(`/api/agents/${id}/probe`, { method: 'POST' }); toast('已重新探测'); refreshStatus(); break;
+      case 'agent-probe': await api(`/api/agents/${id}/probe`, { method: 'POST', timeoutMs: 60000 }); toast('已重新探测'); refreshStatus(); break;
       case 'logs-tab': state.logsTab = el.dataset.tab; renderLogsView(); break;
       case 'clear-errors': await api('/api/errors', { method: 'DELETE' }); toast('已清空报错'); refreshErrors(); break;
       case 'refresh-plugins': refreshPlugins(); break;
@@ -1581,6 +1608,7 @@ document.addEventListener('click', async e => {
         break;
       case 'mem-preview': previewMemory(); break;
       case 'mem-refresh': renderMemory(); break;
+      case 'memmd-refresh': refreshMemMd(); break;
       case 'ws-open': wsOpen(el.dataset.path); break;
       case 'ws-preview': wsPreview(el.dataset.path); break;
       case 'ws-copy': wsCopy(el.dataset.path); break;

@@ -4,7 +4,7 @@
 //   memories —— 长期共享记忆(要点/决策/结论/片段),可按标签与关键词召回
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { MEMORY_FILE } from './config.js';
+import { MEMORY_FILE, MEMORY_MD_FILE } from './config.js';
 
 const MAX_CONTENT = 8000;   // 单条内容上限(字符)
 const MAX_TAGS = 12;        // 单条标签数量上限
@@ -253,5 +253,76 @@ export class MemoryHub {
     const maxInj = cfg.maxInjectedChars || 6000;
     if (prelude.length > maxInj) prelude = prelude.slice(0, maxInj) + '\n…(共享内容较长,已截断)';
     return `${prelude}\n\n请参考上面的共享上下文与历史记忆,再完成下面的任务。\n\n【任务】\n${String(base)}`;
+  }
+
+  // ---------- ~/MEMORY.md(Agent 实际共享记忆文件) ----------
+  // Codex/Claude/dsh 在对话中读写 ~/MEMORY.md(经各自 AGENTS.md/CLAUDE.md 约定),
+  // 这里将其解析为结构化段落,供「共享记忆」页实时展示。
+  memMd() {
+    try {
+      if (!fs.existsSync(MEMORY_MD_FILE)) {
+        return { exists: false, path: MEMORY_MD_FILE, updatedAt: 0, sections: [] };
+      }
+      const txt = fs.readFileSync(MEMORY_MD_FILE, 'utf8');
+      const st = fs.statSync(MEMORY_MD_FILE);
+      const sections = [];
+      let title = '';
+      let buf = [];
+      const flush = () => {
+        const content = buf.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+        if (title || content) sections.push({ title: title || '(前言)', content });
+        title = '';
+        buf = [];
+      };
+      for (const line of txt.split('\n')) {
+        const m = line.match(/^##\s+(.+)$/);
+        if (m) { flush(); title = m[1].trim(); }
+        else buf.push(line);
+      }
+      flush();
+      return { exists: true, path: MEMORY_MD_FILE, updatedAt: st.mtimeMs, sections };
+    } catch (e) {
+      return { exists: false, path: MEMORY_MD_FILE, updatedAt: 0, sections: [], error: String(e.message || e) };
+    }
+  }
+
+  // 任务完成后自动在 ~/MEMORY.md 追加一条简洁记录(滚动保留最近 N 条),
+  // 让「共享记忆」面板在多轮对话后能看到沉淀内容;可在配置 memory.recordTasks=false 关闭。
+  recordTask({ agentId, prompt, status, createdAt, finishedAt, error } = {}) {
+    try {
+      const cfg = (this.config && this.config.memory) || {};
+      if (cfg.recordTasks === false) return;
+      const p = String(prompt || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      if (!p) return;
+      const when = new Date(finishedAt || Date.now());
+      const dur = (finishedAt && createdAt) ? Math.max(0, Math.round((finishedAt - createdAt) / 1000)) : 0;
+      const icon = status === 'done' ? '✅' : (status === 'failed' ? '❌' : '◾');
+      const err = (status === 'failed' && error) ? ` | ${String(error).slice(0, 60)}` : '';
+      const line = `- ${when.toISOString().slice(0, 16).replace('T', ' ')} · ${agentId} · ${icon}${status} · ${dur}s${err} | ${p}`;
+      let txt = '';
+      if (fs.existsSync(MEMORY_MD_FILE)) txt = fs.readFileSync(MEMORY_MD_FILE, 'utf8');
+      const HEAD = '## AgentHub 任务记录';
+      const lines = txt.split('\n');
+      const kept = [];
+      let oldRecords = [];
+      let inSection = false;
+      for (const l of lines) {
+        if (/^##\s+/.test(l)) {
+          if (l.trim() === HEAD) { inSection = true; continue; }
+          if (inSection) { inSection = false; kept.push(l); continue; }
+        }
+        if (inSection) {
+          const t = l.trim();
+          if (t.startsWith('-')) oldRecords.push(t);
+          continue;
+        }
+        kept.push(l);
+      }
+      oldRecords = oldRecords.slice(0, 19);
+      const block = [HEAD, '', line, ...oldRecords, ''];
+      let out = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+      out = out ? out + '\n\n' + block.join('\n') : block.join('\n');
+      fs.writeFileSync(MEMORY_MD_FILE, out + '\n');
+    } catch { /* 记录失败不影响任务流程 */ }
   }
 }

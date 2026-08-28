@@ -291,6 +291,9 @@ export class Runner {
     task.finishedAt = Date.now();
     agent.lastActivityAt = Date.now();
 
+    // 已取消(用户点击停止/服务重启取消):子进程可能以任意退出码收尾(如 npx 对 SIGTERM 以 143 退出),
+    // 不得再覆盖为 failed,否则用户看到的取消会变成"失败 exit 143"
+    if (task.status === 'cancelled') return;
     if (code && code.err) return this._fail(task, `启动失败:${code.err}`);
     if (task._timedOut) return this._fail(task, `执行超时(${task.maxMinutes} 分钟),已终止`);
     if (code.sig === 'SIGTERM' || code.sig === 'SIGKILL') {
@@ -302,16 +305,25 @@ export class Runner {
       task.exitCode = 0;
       this._emit(task, { type: 'done', ts: Date.now(), exitCode: 0 });
       this.logstore.push(task.agentId, 'info', `[task ${task.id}] 完成(exit 0)`);
+      if (this.memory) {
+        try { this.memory.recordTask({ agentId: task.agentId, prompt: task.prompt, status: 'done', createdAt: task.createdAt, finishedAt: task.finishedAt }); } catch { /* ignore */ }
+      }
     } else {
       task.status = 'failed';
       task.exitCode = code.code;
-      task.error = `退出码 ${code.code}`;
+      // 128+信号码:常见于被 SIGTERM/SIGKILL 终止(手动停止、服务重启、系统回收)
+      const sigHint = (code.code === 130 || code.code === 137 || code.code === 143)
+        ? '(疑似被外部信号终止:手动停止/服务重启/系统回收)' : '';
+      task.error = `退出码 ${code.code}${sigHint}`;
       // NDJSON 模式:把 stderr 错误详情补进输出(气泡可见 API 错误等)
       if (agent.outputParser === 'ndjson' && buf.err.trim()) {
         task.output += `\n\n[stderr] ${buf.err.trim().slice(-800)}`;
       }
       this._emit(task, { type: 'failed', ts: Date.now(), exitCode: code.code });
       this.logstore.push(task.agentId, 'error', `[task ${task.id}] 失败(exit ${code.code})`);
+      if (this.memory) {
+        try { this.memory.recordTask({ agentId: task.agentId, prompt: task.prompt, status: 'failed', createdAt: task.createdAt, finishedAt: task.finishedAt, error: task.error }); } catch { /* ignore */ }
+      }
     }
   }
 

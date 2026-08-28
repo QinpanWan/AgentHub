@@ -122,6 +122,19 @@ async function l1() {
   await sleep(200);
   t('排队任务可取消', runner.get(blocker.id).status === 'cancelled');
 
+  // 取消运行中任务:子进程收到 SIGTERM 后以退出码 143 收尾(npx/进程组终止的常见行为),
+  // 状态必须保持 cancelled,不得被覆盖成 failed(曾导致用户取消显示为"失败 exit 143")
+  const sigAgent = {
+    ...fakeAgent,
+    buildArgs: () => ['-e', 'process.on("SIGTERM", () => process.exit(143)); setInterval(()=>{}, 1000);']
+  };
+  const runner2 = new Runner({ agents: { get: () => sigAgent }, logstore: ls, config: { queueLimit: 20, maxTaskMinutes: 1 } });
+  const tkc = runner2.submit({ agentId: 'echo', model: 'auto', effort: 'low', prompt: 'cancel-sigterm' });
+  await sleep(500); // 等其进入 running
+  runner2.cancel(tkc.id);
+  const tkcDone = await waitTerminal(runner2, tkc.id, 10000);
+  t('运行中取消后保持 cancelled(不被退出码覆盖)', tkcDone && tkcDone.status === 'cancelled', JSON.stringify(tkcDone && { st: tkcDone.status, err: tkcDone.error, code: tkcDone.exitCode }));
+
   // 提交即落盘:服务在任务排队/运行期间重启也不丢任务
   const tk3 = runner.submit({ agentId: 'echo', model: 'auto', effort: 'low', prompt: 'persist-check' });
   const persistedNow = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8'));

@@ -213,6 +213,13 @@ hish uninstall --purge    # 连 data/(配置/日志/任务历史) 一并删除
 
 数据落盘于 `data/memory.json`。
 
+### Agent 共享记忆（~/MEMORY.md）
+
+Codex / Claude / dsh 在对话中按各自 AGENTS.md/CLAUDE.md 约定读写 `~/MEMORY.md`（跨 Agent 共享记忆文件）。「共享记忆」页下方新增 **Agent 共享记忆** 卡片，实时解析并展示该文件内容（按 `##` 段落拆分），让多轮对话沉淀的要点在面板中直接可见。
+
+- 任务完成后，平台自动向 `~/MEMORY.md` 的「AgentHub 任务记录」小节追加一条简洁记录（时间 · Agent · 状态 · 耗时 · prompt 摘要），滚动保留最近 20 条，可通过配置 `memory.recordTasks=false` 关闭。
+- 解析路径默认 `~/MEMORY.md`，可用环境变量 `MEMORY_MD_FILE` 覆盖。
+
 ## 鸿蒙适配要点（实测沉淀）
 
 1. **进程监控不走 `ps -o 'pid=,pcpu=...'`**：鸿蒙 ps(busybox/toybox)不支持 GNU 字段写法 → 平台改为 `/proc` 直读（comm/cmdline/stat/statm），ps 仅兜底。

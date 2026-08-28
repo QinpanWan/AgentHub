@@ -363,6 +363,9 @@ async function handleApi(req, res, s, method, p, u) {
     const composed = memory.composePrompt(prompt, { agent: body.agent });
     return sendJson(res, { ok: true, base: prompt, composed, injected: composed !== prompt });
   }
+  if (p === '/api/memory/memmd' && method === 'GET') {
+    return sendJson(res, { memmd: memory ? memory.memMd() : { exists: false, path: '', updatedAt: 0, sections: [] } });
+  }
 
   let mm = p.match(/^\/api\/memory\/contexts\/([a-f0-9-]+)$/);
   if (mm && method === 'PUT') {
@@ -528,9 +531,13 @@ async function oneClickInspect(res, s) {
 
 function runOnce(cmd, args, cwd, env, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // detached + 组终止:npx/codex 会派生子进程,只杀直子进程会让管道挂住、等待被无限拉长
+    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let output = '', errTail = '';
-    const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ignore */ } }, timeoutMs);
+    const t = setTimeout(() => {
+      try { if (child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { /* ignore */ }
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+    }, timeoutMs);
     child.stdout.on('data', d => { output = (output + d.toString()).slice(-20000); });
     child.stderr.on('data', d => { errTail = (errTail + d.toString()).slice(-3000); });
     child.on('error', e => resolve({ code: -1, output, errTail: String(e.message) }));

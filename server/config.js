@@ -12,11 +12,12 @@ export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 export const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
+const HOME = os.homedir();
+export const MEMORY_MD_FILE = process.env.MEMORY_MD_FILE || path.join(HOME, 'MEMORY.md');
 export const ASSETS_DIR = path.join(ROOT, 'assets');
 export const HEADLESS_PATCH = path.join(ASSETS_DIR, 'harmony-headless.patch.yml');
 export const WEB_DIR = path.join(ROOT, 'web');
 
-const HOME = os.homedir();
 export const DSH_DIR = process.env.DSH_DIR || path.join(HOME, 'dsh-test');
 export const DSH_BIN = path.join(DSH_DIR, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
 export const DSH_WEB_SCRIPT = process.env.DSH_WEB_SCRIPT || path.join(HOME, 'bin', 'dsh-web.sh');
