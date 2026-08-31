@@ -20,7 +20,7 @@
 在鸿蒙 PC 的 **HiShell 终端**中：
 
 ```sh
-git clone https://github.com/Entity-Him/AgentHub.git
+git clone https://github.com/QinpanWan/AgentHub.git
 cd AgentHub
 sh hish install        # 完整安装:校验环境 + 建数据目录 + 安装 hish 命令
 ```
@@ -246,13 +246,18 @@ Codex / Claude / dsh 在对话中按各自 AGENTS.md/CLAUDE.md 约定读写 `~/M
 
 ## 致谢
 
-- 鸿蒙 dsh 适配方案与 headless 补丁来源：[Entity-Him/dsh-harmonyos-pc](https://github.com/Entity-Him/dsh-harmonyos-pc)（MIT）
-- Codex 鸿蒙移植方案：[Entity-Him/codex-harmonyos](https://github.com/Entity-Him/codex-harmonyos)（MIT）
+- 鸿蒙 dsh 适配方案与 headless 补丁来源：[QinpanWan/dsh-harmonyos-pc](https://github.com/QinpanWan/dsh-harmonyos-pc)（MIT）
+- Codex 鸿蒙移植方案：[QinpanWan/codex-harmonyos](https://github.com/QinpanWan/codex-harmonyos)（MIT）
 
 MIT License。
 
 ## 更新记录
 
+- **v1.3（2026-08-31）**：修复存储剩余显示不准与 CPU 型号抖动，系统资源卡片改为 DevInfo 风格米色主题：
+  - 存储读数不准：原先取 `df -k /`（鸿蒙根目录为 tmpfs，Use% 恒≈1%），改为自动选择容量最大的真实存储分区（userdata），剩余空间显示恢复正常
+  - CPU 型号归一化：参考鸿蒙「设备信息」应用，麒麟系列统一展示为 `Hisilicon Kirin X90`，不再出现「未知」
+  - CPU 型号刷新变「未知」：后端未重启期间，前端从静态 `cpu-model.json` 兜底补齐型号，刷新不再抖动
+  - 系统资源仪表改为 DevInfo 风格卡片，配色回归米色浅色主题，与整体 UI 一致
 - **v1.2（2026-08-28）**：修复 Claude 对话超时与一键巡检报错，新增 `~/MEMORY.md` 共享记忆展示与任务自动记录：
   - 对话超时：前端 `api()` 默认超时 10s→30s，一键巡检显式 300s、重新探测 60s，超时中止给友好提示；静态资源 `no-cache`，刷新即生效
   - 巡检误报失败：停止运行中任务时子进程退出码 143 覆盖了 `cancelled` 状态，增加 `cancelled` 守卫与 130/137/143「疑似外部信号终止」提示

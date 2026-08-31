@@ -166,6 +166,12 @@ tbody tr:hover td { background: #faf5ea; }
 .sys-bar-row .bar { flex: 1; }
 .sys-bar-row .val { width: 56px; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--text); }
 
+.sys-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+.sys-card { background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 13px; min-width: 0; position: relative; overflow: hidden; }
+.sys-card::after { content: ""; position: absolute; right: -14px; top: -14px; width: 46px; height: 46px; border-radius: 50%; background: var(--accent-soft); opacity: .65; }
+.sys-card-label { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .4px; position: relative; }
+.sys-card-value { font-size: 14px; font-weight: 700; color: var(--text); font-family: var(--mono); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
+
 /* —— 控制台 —— */
 .console-wrap { display: grid; grid-template-columns: 390px 1fr; gap: 16px; align-items: start; }
 .agent-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
@@ -325,7 +331,82 @@ tbody tr:hover td { background: #faf5ea; }
 #view-memory .field select { min-width: 0; }
 #view-memory textarea { min-height: 78px; }
 
+/* —— 系统资源 · DevInfo 风格仪表(参考桌面 DevInfo 小部件) —— */
+.devinfo {
+  --di-bg: #faf6ec;
+  --di-tile: #fffdf6;
+  --di-tile-dark: #f2f7f0;
+  --di-text: #3d3328;
+  --di-muted: #8a7d6a;
+  --di-accent: #6f8f6f;
+  --di-teal: #a4713f;
+  --di-red: #b5533f;
+  --di-border: #e4dac6;
+  display: grid;
+  grid-template-columns: 1.05fr 1.05fr 1.55fr 1.55fr 1.5fr;
+  grid-template-rows: auto auto auto;
+  gap: 12px;
+  background: var(--di-bg);
+  border-radius: 20px;
+  padding: 16px;
+  color: var(--di-text);
+  box-shadow: 0 1px 3px rgba(90,70,40,.06), 0 1px 2px rgba(90,70,40,.04);
+}
+.devinfo .di-tile { background: var(--di-tile); border: 1px solid var(--di-border); border-radius: 14px; padding: 12px 14px; min-width: 0; position: relative; overflow: hidden; }
+.di-wifi { grid-column: 1; grid-row: 1; }
+.di-signal { grid-column: 2; grid-row: 1; }
+.di-date { grid-column: 3 / 5; grid-row: 1; }
+.di-storage { grid-column: 5; grid-row: 1; }
+.di-bt { grid-column: 1; grid-row: 2; }
+.di-loc { grid-column: 2; grid-row: 2; }
+.di-cpu { grid-column: 3 / 5; grid-row: 2; }
+.di-os { grid-column: 3 / 5; grid-row: 3; }
+.di-batt { grid-column: 1 / 3; grid-row: 3; }
+.di-device { grid-column: 5; grid-row: 2 / 4; }
+
+.devinfo .di-mini { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 66px; padding: 8px 6px; }
+.di-mini svg { width: 22px; height: 22px; color: var(--di-teal); }
+.di-mini .di-v { font-size: 14px; font-weight: 700; color: var(--di-text); }
+.di-mini .di-k { font-size: 10px; color: var(--di-muted); }
+
+.di-date { display: inline-flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600; color: var(--di-text); }
+
+.di-storage { display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+.di-storage .di-t { font-size: 12px; color: var(--di-muted); }
+.di-storage .di-v { font-size: 21px; font-weight: 800; }
+.di-bar { height: 12px; border-radius: 8px; background: #ece4d2; overflow: hidden; margin-top: 2px; }
+.di-bar i { display: block; height: 100%; border-radius: 8px; background: var(--di-accent); }
+
+.devinfo .di-cpu { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; background: var(--di-tile-dark); border-color: rgba(111,143,111,.28); min-height: 128px; }
+.di-cpu svg { width: 34px; height: 34px; color: var(--di-red); }
+.di-cpu .di-v { font-size: 17px; font-weight: 800; text-align: center; white-space: nowrap; }
+.di-cpu .di-k { font-size: 11px; color: var(--di-muted); }
+
+.di-os { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.di-os .di-k { font-size: 11px; color: var(--di-muted); }
+.di-os .di-v { font-size: 17px; font-weight: 700; }
+
+.di-batt { display: flex; align-items: center; gap: 12px; }
+.di-ring { width: 54px; height: 54px; border-radius: 50%; flex: 0 0 auto; background: conic-gradient(var(--di-accent) calc(var(--pct) * 1%), #ece4d2 0); position: relative; }
+.di-ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--di-tile); }
+.di-batt .di-b { font-size: 19px; font-weight: 800; }
+.di-batt .di-s { font-size: 11px; color: var(--di-muted); margin-top: 2px; }
+
+.di-device { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; }
+.di-device .di-logo { width: 36px; height: 36px; border-radius: 11px; background: linear-gradient(135deg, #c89b6a, #a4713f); display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 15px; box-shadow: 0 2px 8px rgba(90,70,40,.25); }
+.di-device .di-v { font-size: 14px; font-weight: 700; }
+.di-refresh { position: absolute; top: 10px; right: 10px; background: none; border: none; color: var(--di-muted); cursor: pointer; padding: 2px; line-height: 0; }
+.di-refresh svg { width: 15px; height: 15px; }
+.di-refresh:hover { color: var(--di-accent); }
+
 @media (max-width: 1100px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .agent-grid, .plugin-grid, .grid-3, .console-wrap, .settings-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .sys-cards { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .devinfo { grid-template-columns: 1fr 1fr; }
+  .devinfo .di-tile { grid-column: auto !important; grid-row: auto !important; }
 }

@@ -8,7 +8,14 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const fmtTime = ts => new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 const fmtClock = () => new Date().toLocaleTimeString('zh-CN', { hour12: false });
 const fmtDate = ts => new Date(ts).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-const fmtDur = ms => ms == null ? '—' : (ms < 1000 ? ms + 'ms' : ms < 60000 ? (ms / 1000).toFixed(1) + 's' : (ms / 60000).toFixed(1) + 'm');
+const fmtDur = ms => ms == null ? '—' : (ms < 1000 ? ms + 'ms' : ms < 60000 ? (ms / 1000).toFixed(1) + 's' : ms < 3600000 ? (ms / 60000).toFixed(1) + 'm' : ms < 86400000 ? (ms / 3600000).toFixed(1) + 'h' : (ms / 86400000).toFixed(1) + 'd');
+const fmtUptime = s => {
+  if (s == null) return '—';
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d > 0) return h > 0 ? d + ' 天 ' + h + ' 小时' : d + ' 天';
+  if (h > 0) return m > 0 ? h + ' 小时 ' + m + ' 分' : h + ' 小时';
+  return m > 0 ? m + ' 分钟' : s + ' 秒';
+};
 const fmtBytes = kb => kb >= 1048576 ? (kb / 1048576).toFixed(1) + ' GB' : kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB';
 const badge = s => ({ done: ['badge-ok', '已完成'], failed: ['badge-err', '失败'], running: ['badge-blue', '运行中'], queued: ['badge-warn', '排队中'], cancelled: ['badge-dim', '已取消'] }[s] || ['badge-dim', s]);
 
@@ -193,6 +200,21 @@ function loadView(view) {
 async function refreshStatus() {
   try {
     const d = await api('/api/status');
+    // 后端未重启前 /api/status 无 cpuModel:用静态兜底文件补齐型号.
+    // 不能让兜底"只补一次"——后端重启前每次轮询都不会带 cpuModel,
+    // 一次性补会导致下一轮轮询又变「未知」;故缓存兜底值,每次缺失都补上.
+    if (d.system && !d.system.cpuModel) {
+      if (!state._cpuModelFallback) {
+        try {
+          const r = await fetch('/cpu-model.json', { cache: 'no-store' });
+          if (r.ok) {
+            const j = await r.json();
+            if (j && j.cpuModel) state._cpuModelFallback = j.cpuModel;
+          }
+        } catch { /* 文件暂不可用则保持未知,下轮轮询重试 */ }
+      }
+      if (state._cpuModelFallback) d.system.cpuModel = state._cpuModelFallback;
+    }
     state.status = d;
     state._failCount = 0;
     hideConnBanner();
@@ -287,37 +309,24 @@ function renderOverview(d) {
       <div class="stat-card"><div class="stat-num">${(sys.load1 ?? 0).toFixed(2)}</div><div class="stat-label">系统负载 (1min)</div></div>
     </div>
 
-    <div class="grid grid-2 mt16">
-      <div class="card">
-        <div class="card-title">系统资源 <span class="sub">实时仪表</span></div>
-        <div class="gauge-grid">
-          ${gaugeCard('CPU', sys.cpu)}
-          ${gaugeCard('内存', sys.mem)}
-          ${gaugeCard('磁盘', sys.disk)}
-          <div class="gauge-box">
-            <div class="gauge-load">
-              <div><span class="load-num">${(sys.load1 ?? 0).toFixed(2)}</span></div>
-              <div class="small muted" style="margin-top:2px">5min ${(sys.load5 ?? 0).toFixed(2)} · 15min ${(sys.load15 ?? 0).toFixed(2)}</div>
-            </div>
-            <div class="gauge-label">负载</div>
-          </div>
-        </div>
-        <div class="mt8 small muted">内存 ${fmtBytes(sys.memUsed || 0)} / ${fmtBytes(sys.memTotal || 0)} · 已运行 ${fmtDur((sys.uptime || 0) * 1000)}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Agent 状态 <span class="sub">${d.counts.plugins} 插件 · ${d.counts.skills} 技能 · ${d.counts.memories || 0} 记忆</span></div>
-        <table>
-          <tr><th>Agent</th><th>状态</th><th>进程占用</th><th>当前活动</th></tr>
-          ${agents.map(a => `
+    <div class="card mt16">
+      <div class="card-title">系统资源 <span class="sub">实时仪表</span></div>
+      ${systemDashboard(sys)}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Agent 状态 <span class="sub">${d.counts.plugins} 插件 · ${d.counts.skills} 技能 · ${d.counts.memories || 0} 记忆</span></div>
+      <table>
+        <tr><th>Agent</th><th>状态</th><th>进程占用</th><th>当前活动</th></tr>
+        ${agents.map(a => `
             <tr>
               <td><b>${esc(a.name)}</b> <span class="muted small">${esc(a.version || '')}</span></td>
               <td>${a.enabled ? (a.available ? '<span class="dot dot-ok"></span>可用' : '<span class="dot dot-err"></span>不可用') : '<span class="dot dot-dim"></span>已停用'}${a.proc.pids.length ? `<span class="badge badge-warn" style="margin-left:6px">进程活跃</span>` : ''}</td>
               <td class="small">CPU ${a.proc.cpu.toFixed(1)}% · MEM ${a.proc.mem.toFixed(1)}%</td>
               <td class="small">${activityHtml(a)}</td>
             </tr>`).join('')}
-        </table>
-        <div class="mt12"><button class="btn btn-primary btn-sm" data-action="oneclick">一键巡检全部 Agent</button></div>
-      </div>
+      </table>
+      <div class="mt12"><button class="btn btn-primary btn-sm" data-action="oneclick">一键巡检全部 Agent</button></div>
     </div>
 
     <div class="card mt16">
@@ -326,6 +335,69 @@ function renderOverview(d) {
     </div>
   `;
   $('#view-overview').dataset.ready = '1';
+}
+
+// 系统资源 · DevInfo 风格仪表(参考桌面 DevInfo 小部件卡片布局)
+function systemDashboard(sys) {
+  const cpu = Math.round(sys.cpu ?? 0);
+  const mem = Math.round(sys.mem ?? 0);
+  const disk = sys.disk == null ? null : Math.round(sys.disk);
+  const load1 = sys.load1 ?? 0;
+  const cpuModel = sys.cpuModel || '未知';
+  const memUsed = sys.memUsed ?? 0;
+  const memTotal = sys.memTotal ?? 0;
+  const memDetail = memTotal ? memUsed + ' MB / ' + memTotal + ' MB' : '—';
+  const free = disk == null ? null : Math.max(0, 100 - disk);
+  const dateTxt = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'numeric', day: 'numeric' });
+  const I = {
+    cpu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="6" width="12" height="12" rx="2.5"/><g stroke-linecap="round"><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></g></svg>',
+    mem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="8" width="18" height="9" rx="2"/><path d="M6 8v9M10 8v9M14 8v9M18 8v9M6 5v3M10 5v3M14 5v3M18 5v3"/></svg>',
+    disk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>',
+    load: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 17a8.5 8.5 0 0 1 17 0"/><path d="M12 17l3.5-6.5" stroke-linecap="round"/><circle cx="12" cy="17" r="1.4" fill="currentColor" stroke="none"/></svg>',
+    plane: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M3 11l18-8-7 18-2.5-7z"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2 5.3"/><path d="M20 6v5h-5"/></svg>'
+  };
+  const mini = (cls, ic, v, k) => `<div class="di-tile di-mini ${cls}" title="${k}">${ic}<div class="di-v">${esc(v)}</div><div class="di-k">${k}</div></div>`;
+  return `
+  <div class="devinfo">
+    ${mini('di-wifi', I.cpu, cpu + '%', 'CPU')}
+    ${mini('di-signal', I.mem, mem + '%', '内存')}
+    ${mini('di-bt', I.disk, disk == null ? '--' : disk + '%', '磁盘')}
+    ${mini('di-loc', I.load, load1.toFixed(2), '负载')}
+
+    <div class="di-tile di-date">${esc(dateTxt)}</div>
+
+    <div class="di-tile di-storage">
+      <div class="di-t">存储剩余</div>
+      <div class="di-v">${free == null ? '--' : free + '%'}</div>
+      <div class="di-bar"><i style="width:${free == null ? 0 : free}%"></i></div>
+    </div>
+
+    <div class="di-tile di-cpu">
+      ${I.plane}
+      <div class="di-v">${esc(cpuModel)}</div>
+      <div class="di-k">CPU 型号</div>
+    </div>
+
+    <div class="di-tile di-os">
+      <div class="di-k">已运行</div>
+      <div class="di-v">${esc(fmtUptime(sys.uptime))}</div>
+    </div>
+
+    <div class="di-tile di-batt">
+      <div class="di-ring" style="--pct:${mem}"></div>
+      <div>
+        <div class="di-b">${mem}%</div>
+        <div class="di-s">内存 · ${esc(memDetail)}</div>
+      </div>
+    </div>
+
+    <div class="di-tile di-device">
+      <button class="di-refresh" data-action="sys-refresh" title="刷新">${I.refresh}</button>
+      <div class="di-logo">AH</div>
+      <div class="di-v">AgentHub · 运行中</div>
+    </div>
+  </div>`;
 }
 
 // SVG 半圆仪表盘(0-100)
@@ -1512,6 +1584,7 @@ document.addEventListener('click', async e => {
       case 'logs-tab': state.logsTab = el.dataset.tab; renderLogsView(); break;
       case 'clear-errors': await api('/api/errors', { method: 'DELETE' }); toast('已清空报错'); refreshErrors(); break;
       case 'refresh-plugins': refreshPlugins(); break;
+      case 'sys-refresh': refreshStatus(); break;
       case 'skill-toggle':
         await api('/api/skills/' + encodeURIComponent(id) + '/toggle', { method: 'POST' });
         refreshPlugins();
