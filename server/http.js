@@ -17,8 +17,8 @@ const MIME = {
   '.md': 'text/plain; charset=utf-8'
 };
 
-export function createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory }) {
-  const state = { config, logstore, monitor, agents, runner, plugins, workspaces, memory };
+export function createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat }) {
+  const state = { config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat };
 
   const server = http.createServer((req, res) => {
     try {
@@ -47,7 +47,7 @@ async function handle(req, res, s) {
 }
 
 async function handleApi(req, res, s, method, p, u) {
-  const { config, logstore, monitor, agents, runner, plugins, workspaces, memory } = s;
+  const { config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat } = s;
   const seg = p.split('/').filter(Boolean); // ['api', ...]
 
   // —— 健康检查 ——
@@ -83,6 +83,7 @@ async function handleApi(req, res, s, method, p, u) {
       agents: agentsList,
       counts: {
         tasks: runner.counts(),
+        rooms: roomHub ? roomHub.listRooms().length : 0,
         errors: logstore.errorCount(),
         plugins: plugins.listDshPlugins().length,
         skills: plugins.listSkills().length,
@@ -207,6 +208,41 @@ async function handleApi(req, res, s, method, p, u) {
   if (m && method === 'POST') {
     const ok = runner.cancel(m[1]);
     return sendJson(res, { ok });
+  }
+
+  // —— 多 Agent 群聊 ——
+  if (p === '/api/rooms' && method === 'GET') {
+    return sendJson(res, { rooms: roomHub ? roomHub.listRooms() : [] });
+  }
+  if (p === '/api/rooms' && method === 'POST') {
+    const body = await readBody(req);
+    const room = roomHub.createRoom({ title: body.title, agents: body.agents });
+    return sendJson(res, { ok: true, room: roomHub.publicRoom(room.id) }, 201);
+  }
+  m = p.match(/^\/api\/rooms\/([A-Za-z0-9_-]+)$/);
+  if (m && method === 'GET') {
+    const room = roomHub.getRoom(m[1]);
+    if (!room) return sendErr(res, 404, '房间不存在');
+    const msgs = roomHub.getMessages(m[1], { limit: Number(u.searchParams.get('limit') || 200) });
+    return sendJson(res, { room: { id: room.id, title: room.title, agents: room.agents, createdAt: room.createdAt, updatedAt: room.updatedAt, turns: room.turns }, messages: msgs });
+  }
+  if (m && method === 'DELETE') {
+    const ok = roomHub.deleteRoom(m[1]);
+    return sendJson(res, { ok });
+  }
+  m = p.match(/^\/api\/rooms\/([A-Za-z0-9_-]+)\/messages$/);
+  if (m && method === 'POST') {
+    const body = await readBody(req);
+    try {
+      const out = roomChat.submit(m[1], {
+        prompt: body.prompt, target: body.target,
+        model: body.model || 'auto', effort: body.effort || 'medium',
+        useMemory: body.useMemory !== false
+      });
+      return sendJson(res, { ok: true, room: out.room, userMessage: out.userMessage, turns: out.turns }, 201);
+    } catch (e) {
+      return sendErr(res, 400, e.message);
+    }
   }
 
   // —— 一键巡检 ——

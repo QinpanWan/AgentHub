@@ -177,6 +177,77 @@ async function l1() {
   t('Runner 注入共享上下文到 prompt', !!(capturedPrompt && capturedPrompt.includes('ThisShouldBeInjected') && capturedPrompt.includes('【任务】')), capturedPrompt ? capturedPrompt.slice(0, 80) : 'no capture');
   mh.deleteContext(injectCtx.id);
 
+  // 5c. 多 Agent 群聊(房间/@ 转派/运行中求助/记忆衔接)
+  console.log('  多 Agent 群聊(房间/@ 转派/记忆衔接):');
+  const roomsMod = await import(path.join(ROOT, 'server', 'room.js'));
+  const { detectMentions, extractMentionText, renderTranscript, fitPrompt, RoomHub, RoomChat } = roomsMod;
+  const ROOMS_FILE = path.join(ROOT, 'data', 'rooms.json');
+  let origRooms = '';
+  try { origRooms = fs.readFileSync(ROOMS_FILE, 'utf8'); } catch { /* ignore */ }
+  const roomAgents = {
+    get: (id) => ({ id, name: id === 'codex' ? 'Codex' : id === 'claude' ? 'Claude' : 'dsh', icon: '◆', enabled: () => true, available: true })
+  };
+  t('@ 检测', detectMentions('@claude 帮我', ['codex', 'claude', 'dsh']).join() === 'claude');
+  t('@ 去重', detectMentions('@dsh @dsh 帮我', ['codex', 'claude', 'dsh']).join() === 'dsh');
+  t('@ 片段提取', (extractMentionText('@dsh 请帮我接手余下部分,尽量今天完成', 'dsh') || '').startsWith('请帮我接手'));
+  t('transcript 含作者与目标', renderTranscript([
+    { role: 'system', text: '⟳ 转派' },
+    { role: 'agent', authorId: 'codex', authorName: 'Codex', text: '我来', status: 'running', target: 'claude' },
+    { role: 'user', text: '好' }
+  ], { limit: 10 }).includes('@codex(Codex)') );
+
+  // fitPrompt:超长时仍保留「本次请求」尾部,不截断当前任务
+  const longBody = '【本次请求】\n' + '任务内容'.repeat(9000);
+  const fitted = fitPrompt('【群聊上下文】\n' + '旧'.repeat(20000) + '\n' + longBody, 12000);
+  t('fitPrompt 保留本次请求尾部', fitted.includes('【本次请求】') && fitted.includes('任务内容') && fitted.length <= 12000);
+
+  // —— RoomChat 核心流程(用假 runner 捕获派发) ——
+  const roomMem = new MemoryHub({ config: cfg });
+  const memId = roomMem.addMemory({ content: '群聊部署需走 hish restart', tags: ['deploy'], agent: 'codex', importance: 4 });
+  const roomHub = new RoomHub({ agents: roomAgents });
+  let seq = 0;
+  const submitted = [];
+  const listeners = new Map();
+  const tasks = new Map();
+  const fRunner = {
+    submitted, tasks,
+    submit(opts) { const task = { id: 'rt' + (++seq), ...opts, status: 'queued', output: '', error: null }; tasks.set(task.id, task); submitted.push(task); return task; },
+    onEvent(id, cb) { if (!listeners.has(id)) listeners.set(id, new Set()); listeners.get(id).add(cb); return () => { const s = listeners.get(id); if (s) s.delete(cb); }; },
+    emit(id, ev) { const s = listeners.get(id); if (s) for (const cb of [...s]) { try { cb(ev); } catch { /* ignore */ } } }
+  };
+  const roomChat = new RoomChat({ roomHub, runner: fRunner, memory: roomMem, config: cfg, logstore: ls });
+  const room = roomHub.createRoom({ title: 'test-room', agents: ['codex', 'claude', 'dsh'] });
+  const out = roomChat.submit(room.id, { prompt: '很重的任务,帮我看看', target: 'codex', effort: 'high', useMemory: true });
+  t('群聊提交派发到 codex', out.turns.length === 1 && out.turns[0].task.agentId === 'codex');
+  t('submit 返回净化房间(可安全 JSON 序列化)', (() => { try { return JSON.stringify(out.room).length > 0 && out.room.timers && !('groupId' in out.room && out.room.groupId); } catch { return false; } })());
+  const codexPrompt = submitted[0].prompt;
+  t('群聊 prompt 含群聊上下文与本次请求', codexPrompt.includes('【群聊上下文') && codexPrompt.includes('【本次请求】'));
+  t('群聊 prompt 注入相关记忆', codexPrompt.includes('群聊部署需走 hish restart'));
+  const noMemChat = new RoomChat({ roomHub, runner: fRunner, memory: roomMem, config: cfg, logstore: ls });
+  const out2 = noMemChat.submit(room.id, { prompt: '不带记忆', target: 'claude', useMemory: false });
+  t('useMemory=false 不注入记忆', !submitted[1].prompt.includes('群聊部署需走 hish restart') && submitted[1].prompt.includes('本次请求'));
+
+  // 运行中 @ 求助 → 立即并行转派
+  const codexTask = submitted.filter(t => t.agentId === 'codex' && t.prompt.includes('很重的任务'))[0];
+  codexTask.status = 'running';
+  fRunner.emit(codexTask.id, { type: 'started' });
+  codexTask.output = '我先分析…… @dsh 请帮我处理余下部分。';
+  fRunner.emit(codexTask.id, { type: 'chunk', text: '我先分析…… @dsh 请帮我处理余下部分。' });
+  const dshLive = submitted.filter(t => t.agentId === 'dsh' && t.prompt.includes('@dsh'));
+  t('运行中 @ 触发并行转派 dsh', dshLive.length === 1 && dshLive[0].status === 'queued', `实际 ${submitted.map(t => t.agentId).join(',')}`);
+
+  // done 时不再重复转派已处理过的 @
+  fRunner.emit(codexTask.id, { type: 'done' });
+  const dshCount = submitted.filter(t => t.agentId === 'dsh').length;
+  t('done 不重复转派已求助的 @dsh', dshCount === 1, `实际 ${dshCount}`);
+
+  // 持久化不应含计时器对象(旧版会把 Node Timer 写进 JSON)
+  roomHub._persist();
+  const persistedRooms = JSON.parse(fs.readFileSync(ROOMS_FILE, 'utf8'));
+  t('rooms.json 不含 timers 字段', persistedRooms.every(r => !('timers' in r)));
+  roomMem.deleteMemory(memId.id);
+  try { fs.writeFileSync(ROOMS_FILE, origRooms); } catch { /* ignore */ }
+
   // 6. 插件扫描
   console.log('  插件/技能扫描:');
   const { Plugins } = await import(path.join(ROOT, 'server', 'plugins.js'));

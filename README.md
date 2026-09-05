@@ -253,6 +253,18 @@ MIT License。
 
 ## 更新记录
 
+- **v1.5（2026-09-05）**：任务控制台升级为多 Agent 群聊（房间/消息持久化 + `@` 点名转派 + 卡住自动求助），并修复群聊链路关键 bug：
+  - 修复：`server/http.js` `createServer` 漏收 `roomHub/roomChat`，导致 `/api/rooms` 永远返回空、发消息 500；房间/消息路由正则不匹配 `r`/`m` 前缀 ID，导致群聊页读不到历史、发不出消息（真正根因）
+  - 修复：`submit` 返回的 room 含运行中的 `timers`（Node Timeout），`sendJson` 序列化循环引用爆掉；`rooms.json` 落盘不再写入 live Timer 与批次 `groupId`
+  - 群聊上下文：`composeRoomPrompt` 取群聊最近上下文 + 本次请求保底不截断，仅 `useMemory` 时注入少量记忆摘要（不再整份倒内存），`fitPrompt` 改为从头部裁剪保留请求尾部
+  - 协作：运行中 `@` 检测并行转派同伴（边说边 `@` 即时接力），卡住超时自动向同伴求助；`config.room` 新增 `memoryRecall/memoryBriefChars`
+  - 自测：`node test/self-test.js` 52/52 通过（含 `@` 检测/转派/净化落盘断言），HTTP 冒烟 `/api/rooms`、房间详情/消息提交端点均正常
+- **v1.4（2026-09-02）**：Web UI 基于 design-taste-frontend 做反模板化精修（设计读法：技术运维仪表盘，暖色仪器/编辑语言，VARIANCE 4 / MOTION 3 / DENSITY 5）：
+  - 重建设计令牌：以 `style.css` 顶部 `:root` 为唯一色阶来源（暖纸中性色 + 焦糖/赭石强调 + 橄榄绿/琥珀/陶红语义色），组件全部改用语义变量，消除「DevInfo 双份色值、硬编码色」设计债
+  - 导航升级：侧边栏由文本符号替换为 9 套 24×24 内联 SVG 图标，新增 `.nav-label` 支持窄屏折叠为纯图标侧栏；激活态改为柔和高亮 + 左侧强调轨，去掉重渐变/阴影
+  - 组件精修：按钮/徽章/圆点/进度条/表格/表单/卡片统一圆角·阴影·间距体系，指标区启用等宽数字（`tabular-nums`），卡片 hover 轻抬升
+  - 动效与可访问性：统一 `--dur/--ease` 缓动、`focus-visible` 焦点环、`prefers-reduced-motion` 降级、滚动条与 selection 配色收敛
+  - 响应式：≤900px 侧栏折叠为图标、≤1100px 网格降列、≤760px DevInfo 仪表变 2 列
 - **v1.3（2026-08-31）**：修复存储剩余显示不准与 CPU 型号抖动，系统资源卡片改为 DevInfo 风格米色主题：
   - 存储读数不准：原先取 `df -k /`（鸿蒙根目录为 tmpfs，Use% 恒≈1%），改为自动选择容量最大的真实存储分区（userdata），剩余空间显示恢复正常
   - CPU 型号归一化：参考鸿蒙「设备信息」应用，麒麟系列统一展示为 `Hisilicon Kirin X90`，不再出现「未知」

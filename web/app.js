@@ -138,7 +138,8 @@ function drawSpark(canvas, data, color = '#a4713f', maxV) {
 // ================= 状态 =================
 const state = {
   status: null, monitor: null, view: 'overview',
-  console: { agent: 'codex', model: 'auto', effort: 'medium', taskId: null, es: null, messages: [], submitting: false, useMemory: true },
+  console: { agent: 'codex', model: 'auto', effort: 'medium', taskId: null, es: null, messages: [], submitting: false, useMemory: true,
+    roomId: null, rooms: [], target: 'auto', streams: new Map(), roomTimer: null },
   logsTab: 'logs', logsAgent: 'all',
   timers: []
 };
@@ -172,6 +173,7 @@ window.addEventListener('hashchange', route);
 
 function loadView(view) {
   clearInterval(state._viewTimer);
+  if (state.console.roomTimer) { clearInterval(state.console.roomTimer); state.console.roomTimer = null; }
   try {
     if (view === 'monitor') { refreshMonitorData(); state._viewTimer = setInterval(refreshMonitorData, 3000); }
     else if (view === 'logs') { renderLogsView(); refreshLogs(); state._viewTimer = setInterval(refreshLogs, 3000); }
@@ -180,6 +182,8 @@ function loadView(view) {
     else if (view === 'memory') { renderMemory(); }
     else if (view === 'console') {
       refreshTaskList();
+      if (state.console.roomTimer) clearInterval(state.console.roomTimer);
+      state.console.roomTimer = setInterval(() => { if (state.view === 'console') refreshRooms(); }, 4000);
       if (state.status && Array.isArray(state.status.agents) && state.status.agents.length) {
         initConsoleForm();
         // 切回控制台时,若任务仍在运行/排队但流已断开,自动重连(切走页面不中断任务)
@@ -403,14 +407,14 @@ function systemDashboard(sys) {
 // SVG 半圆仪表盘(0-100)
 function gaugeCard(label, val) {
   const v = val == null ? 0 : Math.min(100, Math.max(0, val));
-  const color = v > 85 ? '#b5533f' : v > 65 ? '#c98a2d' : '#6f8f6f';
+  const color = v > 85 ? '#b04a3a' : v > 65 ? '#a86f1f' : '#5c7f5e';
   const r = 50, len = Math.PI * r;
   const dash = (len * v / 100).toFixed(1);
   return `<div class="gauge-box">
     <svg viewBox="0 0 120 74" style="width:100%;display:block;margin:0 auto">
-      <path d="M 10 60 A 50 50 0 0 1 110 60" fill="none" stroke="#ece4d2" stroke-width="11" stroke-linecap="round"/>
+      <path d="M 10 60 A 50 50 0 0 1 110 60" fill="none" stroke="#ece5d6" stroke-width="11" stroke-linecap="round"/>
       <path d="M 10 60 A 50 50 0 0 1 110 60" fill="none" stroke="${color}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${dash} ${len.toFixed(1)}"/>
-      <text x="60" y="50" text-anchor="middle" font-size="22" font-weight="800" fill="${color}" font-family="monospace">${val == null ? '--' : Math.round(v)}<tspan font-size="11" fill="#8a7d6a">%</tspan></text>
+      <text x="60" y="50" text-anchor="middle" font-size="22" font-weight="800" fill="${color}" font-family="monospace">${val == null ? '--' : Math.round(v)}<tspan font-size="11" fill="#8b7e68">%</tspan></text>
     </svg>
     <div class="gauge-label">${label}</div>
   </div>`;
@@ -441,106 +445,58 @@ function renderTaskHistory(tasks) {
 // ================= 任务控制台(群聊) =================
 const AGENT_COLORS = { codex: '#b08968', claude: '#a4713f', dsh: '#c98a2d' };
 
-function initConsoleForm() {
-  const el = $('#view-console');
-  try {
-    const agents = (state.status && state.status.agents) || [];
-    const cur = state.console.agent;
-    const curA = agents.find(a => a.id === cur);
-    // 模型列表兜底:服务端配置缺失/为空时补常用档位,保证下拉始终有选项
-    let models = (curA && Array.isArray(curA.models) && curA.models.length) ? curA.models : ['auto', 'deepseek-v4-flash', 'deepseek-v4-pro'];
-    if (!models.includes('auto')) models = ['auto', ...models];
-    const agentOpts = agents.length
-      ? agents.map(a => `<option value="${esc(a.id)}" ${a.id === cur ? 'selected' : ''} ${(!a.enabled || !a.available) ? 'disabled' : ''}>${esc(a.name)}${!a.enabled ? '(已停用)' : !a.available ? '(不可用)' : ''}</option>`).join('')
-      : ['codex', 'claude', 'dsh'].map(id => `<option value="${id}" ${id === cur ? 'selected' : ''}>${id}</option>`).join('');
-    el.innerHTML = `
-    <div class="card chat-card">
-      <div id="chat-status" class="chat-status hidden"></div>
-      <div class="chat-area" id="chat-area">
-        <div class="chat-empty">👋 群聊模式:选好要发送的 Agent(含模型/思考强度),写下消息,回车或点发送。<br>各 Agent 的回复以气泡形式显示,并标注回复方。</div>
-      </div>
-      <div class="chat-input">
-        <div class="chat-selects">
-          <label>发送给</label>
-          <select id="f-agent">
-            ${agentOpts}
-          </select>
-          <label>模型</label>
-          <select id="f-model">
-            ${models.map(m => `<option value="${esc(m)}" ${m === state.console.model ? 'selected' : ''}>${m === 'auto' ? '自动(按思考强度)' : esc(m)}</option>`).join('')}
-          </select>
-          <label>强度</label>
-          <div class="seg" style="width:196px">
-            <button data-action="set-effort" data-v="low" class="${state.console.effort === 'low' ? 'sel' : ''}">低</button>
-            <button data-action="set-effort" data-v="medium" class="${state.console.effort === 'medium' ? 'sel' : ''}">中</button>
-            <button data-action="set-effort" data-v="high" class="${state.console.effort === 'high' ? 'sel' : ''}">高</button>
-          </div>
-          <label class="inline" title="把团队共享上下文与历史记忆注入本次任务 prompt">
-            <input type="checkbox" id="f-memory" ${state.console.useMemory ? 'checked' : ''}> 附带共享上下文
-          </label>
-          <button class="btn btn-sm" data-action="oneclick" id="btn-inspect">一键巡检</button>
-          <span class="muted small" id="console-hint"></span>
-        </div>
-        <div class="chat-row">
-          <textarea id="f-prompt" placeholder="给 ${esc(curA ? curA.name : '')} 的消息:直接写下要它做的事…(Ctrl+Enter 发送)"></textarea>
-          <div class="chat-btns">
-            <button class="btn btn-primary" data-action="submit-task" id="btn-send">发送</button>
-            <button class="btn btn-danger ${state.console.taskId ? '' : 'hidden'}" data-action="cancel-task" id="btn-cancel">停止</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
-    $('#f-agent').addEventListener('change', e => {
-      state.console.agent = e.target.value;
-      state.console.model = 'auto';
-      const a = ((state.status && state.status.agents) || []).find(x => x.id === state.console.agent);
-      const models = (a && Array.isArray(a.models) && a.models.length) ? a.models : ['auto', 'deepseek-v4-flash', 'deepseek-v4-pro'];
-      const sel = $('#f-model');
-      sel.innerHTML = models.map(m => `<option value="${esc(m)}">${m === 'auto' ? '自动(按思考强度)' : esc(m)}</option>`).join('');
-      $('#f-prompt').placeholder = `给 ${a ? a.name : ''} 的消息:直接写下要它做的事…(Ctrl+Enter 发送)`;
-    });
-    $('#f-model').addEventListener('change', e => { state.console.model = e.target.value; });
-    const memBox = $('#f-memory');
-    if (memBox) memBox.addEventListener('change', () => { state.console.useMemory = memBox.checked; });
-    $('#f-prompt').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitTask(); }
-    });
-    renderChat();
-    loadChatHistory();
-  } catch (e) {
-    try { el.innerHTML = `<div class="card"><div class="card-title">任务控制台</div><div class="small" style="color:var(--red)">控制台渲染失败:${esc(e && e.message)}</div></div>`; } catch { /* ignore */ }
-  }
+function agentMeta(id) {
+  const a = ((state.status && state.status.agents) || []).find(x => x.id === id);
+  return a || { id, name: id === 'codex' ? 'Codex' : id === 'claude' ? 'Claude' : 'dsh', icon: '◈', enabled: true, available: true };
 }
 
-// —— 群聊渲染 ——
+// 把文本中的 @agentId 高亮(先转义再包 span)
+function fmtChatText(text) {
+  const h = esc(text || '');
+  return h.replace(/@(codex|claude|dsh)\b/g, '<span class="mention">@$1</span>');
+}
+
+function roomStatusBadge(m) {
+  if (m.role !== 'agent') return '';
+  const live = m.status === 'running' || m.status === 'queued';
+  if (live) return `<span class="badge badge-blue" style="font-size:10.5px">${m.status === 'running' ? '运行中' : '排队中'}</span>`;
+  if (m.status) return `<span class="badge ${badge(m.status)[0]}" style="font-size:10.5px">${badge(m.status)[1]}</span>`;
+  return '';
+}
+function chatMsgHtml(m) {
+  if (m.role === 'system') {
+    return `<div class="chat-msg system" id="chat-msg-${esc(m.id)}"><div class="chat-system">${fmtChatText(m.text || '')}</div></div>`;
+  }
+  const isUser = m.role === 'user';
+  const name = isUser ? '我' : (m.authorName || m.agentName || m.authorId || m.agentId);
+  const color = isUser ? '#8b7e68' : (AGENT_COLORS[m.authorId || m.agentId] || '#a4713f');
+  const live = m.status === 'running' || m.status === 'queued';
+  return `
+    <div class="chat-msg ${isUser ? 'user' : ''}" id="chat-msg-${esc(m.id)}">
+      <div class="chat-avatar" style="background:${color}">${isUser ? '我' : esc(m.icon || (agentMeta(m.authorId || m.agentId).icon))}</div>
+      <div class="chat-bubble">
+        <div class="chat-head">
+          <span class="chat-name">${esc(name)}</span>
+          ${m.target && m.target !== 'auto' && m.target !== 'all' ? `<span class="mono">→ ${esc(m.target)}</span>` : ''}
+          ${m.model && m.model !== 'auto' ? `<span class="mono">${esc(m.model)}</span>` : ''}
+          ${m.effort ? `<span>强度:${esc(m.effort)}</span>` : ''}
+          ${roomStatusBadge(m)}
+          ${m.taskId ? `<span class="mono muted" style="font-size:10.5px">#${esc(m.taskId)}</span>` : ''}
+        </div>
+        <div class="chat-text">${fmtChatText(m.text || '')}${live ? '<span class="chat-typing"></span>' : ''}</div>
+      </div>
+    </div>`;
+}
 function renderChat() {
   const area = $('#chat-area');
   if (!area) return;
   const msgs = state.console.messages;
-  if (!msgs.length) return;
+  if (!msgs.length) {
+    area.innerHTML = `<div class="chat-empty">👋 真正的多 Agent 群聊。<br>发送给某个 Agent,或在消息里直接 @codex / @claude / @dsh 呼叫;<br>Agent 回复中出现 @ 时会自动转派给它,形成接力,衔接更自然。</div>`;
+    return;
+  }
   area.innerHTML = msgs.map(chatMsgHtml).join('');
   area.scrollTop = area.scrollHeight;
-}
-function chatMsgHtml(m) {
-  const name = m.role === 'user' ? '我' : (m.agentName || m.agentId);
-  const color = m.role === 'user' ? '#8a7d6a' : (AGENT_COLORS[m.agentId] || '#a4713f');
-  const live = m.status === 'running' || m.status === 'queued';
-  const stBadge = !live && m.status
-    ? `<span class="badge ${badge(m.status)[0]}" style="font-size:10.5px">${badge(m.status)[1]}</span>` : '';
-  return `
-    <div class="chat-msg ${m.role === 'user' ? 'user' : ''}" id="chat-msg-${esc(m.id)}">
-      <div class="chat-avatar" style="background:${color}">${m.role === 'user' ? '我' : esc(m.icon || '◈')}</div>
-      <div class="chat-bubble">
-        <div class="chat-head">
-          <span class="chat-name">${esc(name)}</span>
-          ${m.model && m.model !== 'auto' ? `<span class="mono">${esc(m.model)}</span>` : ''}
-          ${m.effort ? `<span>强度:${esc(m.effort)}</span>` : ''}
-          ${live ? `<span class="badge badge-blue" style="font-size:10.5px">${m.status === 'running' ? '运行中' : '排队中'}</span>` : stBadge}
-          ${m.taskId ? `<span class="mono muted" style="font-size:10.5px">#${esc(m.taskId)}</span>` : ''}
-        </div>
-        <div class="chat-text">${esc(m.text || '')}${live ? '<span class="chat-typing"></span>' : ''}</div>
-      </div>
-    </div>`;
 }
 function appendMsgToDom(m) {
   const area = $('#chat-area');
@@ -557,42 +513,208 @@ function updateMsgInDom(m) {
   if (area) area.scrollTop = area.scrollHeight;
 }
 
-async function loadChatHistory() {
+async function ensureDefaultRoom() {
   try {
-    const d = await api('/api/tasks?limit=10');
-    const tasks = d.tasks.slice().reverse();
-    for (const t of tasks) {
-      if (state.console.messages.some(m => m.taskId === t.id)) continue;
-      const a = ((state.status && state.status.agents) || []).find(x => x.id === t.agentId);
-      state.console.messages.push({ id: 'u' + t.id, role: 'user', agentId: t.agentId, agentName: a ? a.name : t.agentId, model: t.model, effort: t.effort, text: t.prompt, status: null });
-      state.console.messages.push({ id: 't' + t.id, role: 'agent', agentId: t.agentId, agentName: a ? a.name : t.agentId, icon: a ? a.icon : '◈', model: t.model, effort: t.effort, text: '', status: t.status, taskId: t.id });
+    const d = await api('/api/rooms');
+    let rooms = d.rooms || [];
+    if (!rooms.length) {
+      const c = await api('/api/rooms', { method: 'POST', body: { title: '默认群聊' } });
+      rooms = [c.room];
     }
+    state.console.rooms = rooms;
+    if (!state.console.roomId || !rooms.some(r => r.id === state.console.roomId)) {
+      state.console.roomId = rooms[0].id;
+    }
+  } catch (e) { toast('群聊服务不可用: ' + e.message, 'err'); }
+}
+
+async function loadRoom() {
+  const id = state.console.roomId;
+  if (!id) return;
+  try {
+    const d = await api('/api/rooms/' + id + '?limit=200');
+    const msgs = d.messages || [];
+    // 合并:用服务端为准,但保留本端正在流式输出的消息文本(避免轮询覆盖)
+    const merged = msgs.map(sm => {
+      const local = state.console.messages.find(m => m.id === sm.id);
+      if (local && (local.status === 'running' || local.status === 'queued')) {
+        return { ...sm, text: local.text, status: local.status };
+      }
+      return sm;
+    });
+    state.console.messages = merged;
     renderChat();
+    // 校验流连接:服务端有新任务但未连流 → 补连
+    for (const sm of merged) {
+      if (sm.role === 'agent' && sm.taskId && (sm.status === 'running' || sm.status === 'queued') && !state.console.streams.has(sm.taskId)) {
+        openTaskStream(sm.taskId, sm);
+      }
+    }
+  } catch { /* 房间可能刚被删,忽略 */ }
+}
+
+async function refreshRooms() {
+  try {
+    const d = await api('/api/rooms');
+    state.console.rooms = d.rooms || [];
+    renderRoomSelector();
+    if (state.console.roomId) loadRoom();
   } catch { /* ignore */ }
 }
 
+function renderRoomSelector() {
+  const sel = $('#f-room');
+  if (!sel) return;
+  const rooms = state.console.rooms || [];
+  sel.innerHTML = rooms.map(r => `<option value="${esc(r.id)}" ${r.id === state.console.roomId ? 'selected' : ''}>${esc(r.title)}${r.running ? ' ·🔴' : ''}</option>`).join('') || '<option value="">无房间</option>';
+}
+
+// —— 控制台:群聊房间 ——
+function initConsoleForm() {
+  const el = $('#view-console');
+  if (!el) return;
+  const agents = (state.status && state.status.agents) || [];
+  const cur = state.console.agent;
+  const curA = agents.find(a => a.id === cur);
+  let models = (curA && Array.isArray(curA.models) && curA.models.length) ? curA.models : ['auto', 'deepseek-v4-flash', 'deepseek-v4-pro'];
+  if (!models.includes('auto')) models = ['auto', ...models];
+  const agentOpts = agents.length
+    ? agents.map(a => `<option value="${esc(a.id)}" ${a.id === cur ? 'selected' : ''} ${(!a.enabled || !a.available) ? 'disabled' : ''}>${esc(a.name)}${!a.enabled ? '(已停用)' : !a.available ? '(不可用)' : ''}</option>`).join('')
+    : ['codex', 'claude', 'dsh'].map(id => `<option value="${id}" ${id === cur ? 'selected' : ''}>${id}</option>`).join('');
+  const parts = agents.filter(a => a.enabled && a.available).map(a => `<span class="part-chip" data-action="pick-agent" data-id="${esc(a.id)}" style="border-color:${AGENT_COLORS[a.id] || '#a4713f'}">${esc(a.icon)} ${esc(a.name)}</span>`).join('');
+  el.innerHTML = `
+  <div class="card chat-card">
+    <div class="room-head">
+      <div class="room-left">
+        <label>群</label>
+        <select id="f-room"></select>
+        <span class="room-part">${parts || '<span class="muted">(无可用的 Agent)</span>'}</span>
+      </div>
+      <div class="room-right">
+        <button class="btn btn-sm" data-action="new-room" id="btn-new-room">+ 新群</button>
+        <button class="btn btn-sm" data-action="clear-room" id="btn-clear-room">清屏(删除)</button>
+      </div>
+    </div>
+    <div id="chat-status" class="chat-status hidden"></div>
+    <div class="chat-area" id="chat-area"><div class="chat-empty">正在加载群聊…</div></div>
+    <div class="chat-input">
+      <div class="chat-selects">
+        <label>发送给</label>
+        <select id="f-target">
+          <option value="auto" ${state.console.target === 'auto' ? 'selected' : ''}>智能 @ / 默认</option>
+          <option value="all" ${state.console.target === 'all' ? 'selected' : ''}>全部 Agent</option>
+          ${agents.map(a => `<option value="${esc(a.id)}" ${state.console.target === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
+        </select>
+        <label>模型</label>
+        <select id="f-model">
+          ${models.map(m => `<option value="${esc(m)}" ${m === state.console.model ? 'selected' : ''}>${m === 'auto' ? '自动(按思考强度)' : esc(m)}</option>`).join('')}
+        </select>
+        <label>强度</label>
+        <div class="seg" style="width:196px">
+          <button data-action="set-effort" data-v="low" class="${state.console.effort === 'low' ? 'sel' : ''}">低</button>
+          <button data-action="set-effort" data-v="medium" class="${state.console.effort === 'medium' ? 'sel' : ''}">中</button>
+          <button data-action="set-effort" data-v="high" class="${state.console.effort === 'high' ? 'sel' : ''}">高</button>
+        </div>
+        <label class="inline" title="把团队共享上下文与历史记忆注入本次任务 prompt">
+          <input type="checkbox" id="f-memory" ${state.console.useMemory ? 'checked' : ''}> 附带共享上下文
+        </label>
+        <button class="btn btn-sm" data-action="oneclick" id="btn-inspect">一键巡检</button>
+        <span class="muted small" id="console-hint"></span>
+      </div>
+      <div class="chat-row">
+        <textarea id="f-prompt" placeholder="群聊消息:给某个 Agent,或用 @codex / @claude / @dsh 点名呼叫…(Ctrl+Enter 发送)"></textarea>
+        <div class="chat-btns">
+          <button class="btn btn-primary" data-action="submit-task" id="btn-send">发送</button>
+          <button class="btn btn-danger ${state.console.taskId ? '' : 'hidden'}" data-action="cancel-task" id="btn-cancel">停止</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  renderRoomSelector();
+  if (state.console.rooms.length === 0) ensureDefaultRoom().then(() => { renderRoomSelector(); loadRoom(); });
+  else loadRoom();
+  const roomSel = $('#f-room');
+  if (roomSel) roomSel.addEventListener('change', e => {
+    state.console.roomId = e.target.value;
+    state.console.messages = [];
+    closeAllStreams();
+    loadRoom();
+  });
+  $('#f-target').addEventListener('change', e => {
+    state.console.target = e.target.value;
+    if (e.target.value !== 'auto' && e.target.value !== 'all') {
+      state.console.agent = e.target.value;
+      state.console.model = 'auto';
+      const a = ((state.status && state.status.agents) || []).find(x => x.id === state.console.agent);
+      const m = (a && Array.isArray(a.models) && a.models.length) ? a.models : ['auto', 'deepseek-v4-flash', 'deepseek-v4-pro'];
+      const sel = $('#f-model');
+      sel.innerHTML = m.map(x => `<option value="${esc(x)}">${x === 'auto' ? '自动(按思考强度)' : esc(x)}</option>`).join('');
+    }
+  });
+  $('#f-model').addEventListener('change', e => { state.console.model = e.target.value; });
+  const memBox = $('#f-memory');
+  if (memBox) memBox.addEventListener('change', () => { state.console.useMemory = memBox.checked; });
+  $('#f-prompt').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitTask(); }
+  });
+}
+
+async function createRoom() {
+  const title = prompt('新群聊名称?', '群聊 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+  if (title === null) return;
+  try {
+    const d = await api('/api/rooms', { method: 'POST', body: { title: title || '默认群聊' } });
+    state.console.rooms.push(d.room);
+    state.console.roomId = d.room.id;
+    state.console.messages = [];
+    renderRoomSelector();
+    loadRoom();
+    toast('已创建群聊', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteCurrentRoom() {
+  const rid = state.console.roomId;
+  if (!rid) return;
+  if (!confirm('删除当前群聊?会清空它的对话历史。')) return;
+  try {
+    await api('/api/rooms/' + rid, { method: 'DELETE' });
+    state.console.messages = [];
+    state.console.roomId = null;
+    await ensureDefaultRoom();
+    renderRoomSelector();
+    loadRoom();
+    toast('已删除', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// —— 发送:进入群聊(单 Agent / 广播 / @ 点名) ——
 async function submitTask() {
-  // 防抖:发送中禁止重复提交
   if (state.console.submitting) return toast('正在发送,请稍候', 'err');
   const prompt = $('#f-prompt').value.trim();
   if (!prompt) return toast('请先填写消息内容', 'err');
-  const agentId = state.console.agent;
+  if (!state.console.roomId) { await ensureDefaultRoom(); }
   const model = state.console.model;
   const effort = state.console.effort;
-  const a = ((state.status && state.status.agents) || []).find(x => x.id === agentId);
-  if (a && !a.available) return toast(`${a.name} 不可用:${a.detail || ''}`, 'err');
-  // 权限模式=confirm:先在群聊里出确认卡片(授予工具权限后才发送)
-  if (a && (a.permissionMode || 'auto') === 'confirm') {
+  const target = state.console.target;
+  const useMemory = state.console.useMemory;
+  // 检查目标可用性(锁定某个不可用 Agent 时直接提示)
+  if (target && target !== 'auto' && target !== 'all') {
+    const a = agentMeta(target);
+    if (!a.available) return toast(`${a.name} 不可用:${a.detail || ''}`, 'err');
+  }
+  const a = agentMeta(state.console.agent);
+  if (a && a.permissionMode === 'confirm' && target !== 'all') {
     if (state.console.pendingConfirm) return toast('已有待确认的发送,请先处理', 'err');
     const sysId = 's' + Date.now();
-    state.console.pendingConfirm = { agentId, model, effort, prompt, sysId, agentName: a.name, useMemory: state.console.useMemory };
+    state.console.pendingConfirm = { target, model, effort, prompt, sysId, agentName: a.name, useMemory, roomId: state.console.roomId };
     const area = $('#chat-area');
     if (area) {
       const empty = area.querySelector('.chat-empty');
       if (empty) empty.remove();
       area.insertAdjacentHTML('beforeend', `
         <div class="chat-msg" id="chat-msg-${sysId}">
-          <div class="chat-avatar" style="background:#8a7d6a">⚠</div>
+          <div class="chat-avatar" style="background:#8b7e68">⚠</div>
           <div class="chat-bubble">
             <div class="chat-head"><span class="chat-name">系统</span></div>
             <div class="chat-text">是否授予 <b>${esc(a.name)}</b> 本次任务的工具执行权限(执行命令/读写文件)?授予后任务运行中的工具操作将自动批准。</div>
@@ -606,123 +728,140 @@ async function submitTask() {
     }
     return;
   }
-  await sendTask({ agentId, model, effort, prompt, useMemory: state.console.useMemory });
+  await sendRoomMessage({ target, model, effort, prompt, useMemory });
 }
 
-async function sendTask({ agentId, model, effort, prompt, useMemory }) {
+async function sendRoomMessage({ target, model, effort, prompt, useMemory }) {
   if (state.console.submitting) return toast('正在发送,请稍候', 'err');
-  const a = ((state.status && state.status.agents) || []).find(x => x.id === agentId);
+  const roomId = state.console.roomId;
+  if (!roomId) return toast('没有可用群聊', 'err');
   state.console.submitting = true;
-  const userMsg = { id: 'u' + Date.now(), role: 'user', agentId, agentName: a ? a.name : agentId, model, effort, text: prompt, status: null };
-  const agentMsg = { id: 't' + Date.now(), role: 'agent', agentId, agentName: a ? a.name : agentId, icon: a ? a.icon : '◈', model, effort, text: '', status: 'queued', taskId: null };
-  state.console.messages.push(userMsg, agentMsg);
-  appendMsgToDom(userMsg);
-  appendMsgToDom(agentMsg);
   $('#f-prompt').value = '';
   try {
-    const d = await api('/api/tasks', { method: 'POST', body: { agentId, model, effort, prompt, useMemory } });
-    agentMsg.taskId = d.task.id;
-    state.console.taskId = d.task.id;
-    $('#btn-cancel').classList.remove('hidden');
-    openTaskStream(d.task.id, agentMsg);
+    const d = await api(`/api/rooms/${roomId}/messages`, { method: 'POST', body: { prompt, target, model, effort, useMemory } });
+    const msgs = d.userMessage ? [d.userMessage] : [];
+    for (const t of (d.turns || [])) if (t && t.message) msgs.push(t.message);
+    state.console.messages = state.console.messages.concat(msgs.filter(m => !state.console.messages.some(x => x.id === m.id)));
+    renderChat();
+    for (const t of (d.turns || [])) {
+      if (t && t.message && t.message.taskId) openTaskStream(t.message.taskId, t.message);
+    }
+    if (!state.console.rooms.some(r => r.id === roomId)) await ensureDefaultRoom();
+    renderRoomSelector();
+    setTimeout(() => loadRoom(), 5000);
   } catch (e) {
-    agentMsg.text = '发送失败: ' + e.message;
-    agentMsg.status = 'failed';
-    updateMsgInDom(agentMsg);
-    toast(e.message, 'err');
+    toast('发送失败: ' + e.message, 'err');
   } finally { state.console.submitting = false; }
 }
 
+// —— SSE:每个 Agent 轮次独立流(可多个并发) ——
 function openTaskStream(id, msg) {
-  closeTaskStream();
+  closeStream(id);
   const es = new EventSource(`/api/tasks/${id}/stream`);
-  state.console.es = es;
+  state.console.streams.set(id, es);
   const t0 = Date.now();
-  // 等待提示条:实时显示已等待时长,避免"卡死"错觉
+  const findMsg = () => state.console.messages.find(m => (m.id === (msg && msg.id)) || m.taskId === id);
   const statusEl = $('#chat-status');
+  const liveCount = () => state.console.messages.filter(m => m.role === 'agent' && (m.status === 'running' || m.status === 'queued')).length;
   if (statusEl) {
     statusEl.classList.remove('hidden');
-    statusEl.innerHTML = `<span class="spin"></span>${esc(msg.agentName || msg.agentId)} 正在回复… <b class="chat-waited">已等待 0s</b>${msg.model && msg.model !== 'auto' ? ` · ${esc(msg.model)}` : ''}`;
+    statusEl.innerHTML = `<span class="spin"></span>${esc((msg && (msg.authorName || msg.agentName)) || 'Agent')} 正在回复… <b class="chat-waited">已等待 0s</b>${msg && msg.model && msg.model !== 'auto' ? ` · ${esc(msg.model)}` : ''}`;
     state.console._waitedTimer = setInterval(() => {
       const w = statusEl.querySelector('.chat-waited');
       if (w) w.textContent = '已等待 ' + Math.round((Date.now() - t0) / 1000) + 's' + ((Date.now() - t0) > 90000 ? '(长时间无输出,可点停止)' : '');
+      if (liveCount() === 0 && $('#chat-status')) $('#chat-status').classList.add('hidden');
     }, 1000);
   }
-  let lastSeq = 0; // SSE 重连重放去重:跳过序号 ≤ 已处理的事件
+  let lastSeq = 0;
   es.onmessage = ev => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
-    if (d.seq != null) {
-      if (d.seq <= lastSeq) return;
-      lastSeq = d.seq;
-    }
+    if (d.seq != null) { if (d.seq <= lastSeq) return; lastSeq = d.seq; }
+    const m = findMsg();
     if (d.type === 'started') {
-      msg.status = 'running';
-      updateMsgInDom(msg);
+      const target = m || msg;
+      if (target) { target.status = 'running'; updateMsgInDom(target); }
     } else if (d.type === 'chunk') {
-      msg.text += d.text;
-      if (msg.text.length > 200000) msg.text = msg.text.slice(-200000);
-      updateMsgInDom(msg);
+      const target = m || msg;
+      if (target) {
+        target.text = (target.text || '') + d.text;
+        if (target.text.length > 200000) target.text = target.text.slice(-200000);
+        updateMsgInDom(target);
+      }
     } else if (d.type === 'done') {
-      msg.text += `\n\n[完成] exit 0 · ${fmtDur(Date.now() - t0)}`;
-      msg.status = 'done';
-      updateMsgInDom(msg);
-      finalizeTask('done');
+      const target = m || msg;
+      if (target) { target.text = (target.text || '') + `\n\n[完成] exit 0 · ${fmtDur(Date.now() - t0)}`; target.status = 'done'; updateMsgInDom(target); }
+      finalizeTask(id, 'done');
     } else if (d.type === 'failed') {
-      msg.text += `\n\n[失败] ${d.error || ('exit ' + d.exitCode)} · ${fmtDur(Date.now() - t0)}`;
-      msg.status = 'failed';
-      updateMsgInDom(msg);
-      finalizeTask('failed');
+      const target = m || msg;
+      if (target) { target.text = (target.text || '') + `\n\n[失败] ${d.error || ('exit ' + d.exitCode)} · ${fmtDur(Date.now() - t0)}`; target.status = 'failed'; updateMsgInDom(target); }
+      finalizeTask(id, 'failed');
     } else if (d.type === 'cancelled') {
-      msg.text += '\n\n[已取消]';
-      msg.status = 'cancelled';
-      updateMsgInDom(msg);
-      finalizeTask('cancelled');
+      const target = m || msg;
+      if (target) { target.text = (target.text || '') + '\n\n[已取消]'; target.status = 'cancelled'; updateMsgInDom(target); }
+      finalizeTask(id, 'cancelled');
     } else if (d.type === 'end') {
-      closeTaskStream();
+      closeStream(id);
     }
   };
   es.onerror = () => { /* 断线由页面轮询兜底 */ };
 }
 
-function finalizeTask(st) {
-  state.console.taskId = null;
-  clearWaitStatus();
-  $('#btn-cancel').classList.add('hidden');
-  setTimeout(() => closeTaskStream(), 500);
+function finalizeTask(id, st) {
+  closeStream(id);
+  if (state.console.taskId === id) { state.console.taskId = null; $('#btn-cancel').classList.add('hidden'); }
+  if (state.console._waitedTimer) { clearInterval(state.console._waitedTimer); state.console._waitedTimer = null; }
+  const s = $('#chat-status');
+  if (s && !state.console.messages.some(m => m.role === 'agent' && (m.status === 'running' || m.status === 'queued'))) s.classList.add('hidden');
 }
 function clearWaitStatus() {
   if (state.console._waitedTimer) { clearInterval(state.console._waitedTimer); state.console._waitedTimer = null; }
   const s = $('#chat-status');
   if (s) s.classList.add('hidden');
 }
-function closeTaskStream() {
-  if (state.console.es) { try { state.console.es.close(); } catch { /* ignore */ } state.console.es = null; }
+function closeStream(id) {
+  const es = state.console.streams.get(id);
+  if (es) { try { es.close(); } catch { /* ignore */ } state.console.streams.delete(id); }
+}
+function closeAllStreams() { for (const id of [...state.console.streams.keys()]) closeStream(id); }
+
+// 取消当前群聊中所有仍在运行/排队/有流的 Agent 轮次
+async function cancelLiveTurns() {
+  const ids = new Set();
+  for (const m of state.console.messages) {
+    if (m.role === 'agent' && m.taskId && (m.status === 'running' || m.status === 'queued')) ids.add(m.taskId);
+  }
+  for (const id of state.console.streams.keys()) ids.add(id);
+  if (!ids.size) return toast('当前没有运行中的轮次', 'err');
+  let n = 0;
+  for (const id of ids) {
+    const r = await api('/api/tasks/' + id + '/cancel', { method: 'POST' });
+    if (r.ok) n++;
+  }
+  closeAllStreams();
+  toast('已请求取消 ' + n + ' 个轮次', n ? 'ok' : 'err');
 }
 
-// 任务流断线兜底:任务仍在运行/排队但没有活跃 SSE 时,重建连接继续收输出
+// 断线兜底:仍在运行/排队的任务无活跃流时重连
 function resumeTaskStream() {
-  const id = state.console.taskId;
-  if (!id || state.console.es) return;
-  const msg = state.console.messages.find(m => m.taskId === id && (m.status === 'running' || m.status === 'queued'));
-  if (!msg) return;
-  openTaskStream(id, msg);
+  for (const m of state.console.messages) {
+    if (m.role === 'agent' && m.taskId && (m.status === 'running' || m.status === 'queued') && !state.console.streams.has(m.taskId)) {
+      openTaskStream(m.taskId, m);
+    }
+  }
 }
 
 async function viewTask(id) {
   try {
     const d = await api('/api/tasks/' + id);
     const t = d.task;
-    closeTaskStream();
-    // 查看的是运行/排队中的任务:先把控制台挂到它上面,再切视图/重连,避免重连到旧任务
-    if (t.status === 'running' || t.status === 'queued') state.console.taskId = id;
     if (state.view !== 'console') switchView('console');
     if (!state.console.messages.some(m => m.taskId === id)) {
       const a = ((state.status && state.status.agents) || []).find(x => x.id === t.agentId);
-      state.console.messages.push({ id: 'u' + id, role: 'user', agentId: t.agentId, agentName: a ? a.name : t.agentId, model: t.model, effort: t.effort, text: t.prompt, status: null });
-      state.console.messages.push({ id: 't' + id, role: 'agent', agentId: t.agentId, agentName: a ? a.name : t.agentId, icon: a ? a.icon : '◈', model: t.model, effort: t.effort, text: (t.output || '(无输出)') + (t.error ? `\n\n[错误] ${t.error}` : ''), status: t.status, taskId: id });
+      state.console.messages.push({ id: 'u' + id, role: 'user', authorId: null, agentId: t.agentId, agentName: a ? a.name : t.agentId, model: t.model, effort: t.effort, text: t.prompt, status: null });
+      state.console.messages.push({ id: 't' + id, role: 'agent', authorId: t.agentId, agentName: a ? a.name : t.agentId, icon: a ? a.icon : '◈', model: t.model, effort: t.effort, text: (t.output || '(无输出)') + (t.error ? `\n\n[错误] ${t.error}` : ''), status: t.status, taskId: id });
       renderChat();
     }
-    resumeTaskStream();
+    if (t.status === 'running' || t.status === 'queued') openTaskStream(id, state.console.messages.find(m => m.taskId === id));
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -928,7 +1067,7 @@ function renderErrors(errors, stats) {
   const max = Math.max(...stats, 1);
   const bars = stats.map((v, i) => {
     const h = Math.max(v > 0 ? 3 : 0, Math.round((v / max) * 40));
-    return `<div title="${v} 条" style="flex:1;background:${v ? '#c98a2d' : '#ece4d2'};border-radius:2px;min-width:2px;height:${h}px"></div>`;
+    return `<div title="${v} 条" style="flex:1;background:${v ? '#c98a2d' : '#ece5d6'};border-radius:2px;min-width:2px;height:${h}px"></div>`;
   }).join('');
   const head = document.createElement('div');
   head.className = 'mt8';
@@ -1554,9 +1693,16 @@ document.addEventListener('click', async e => {
     switch (act) {
       case 'pick-agent':
         state.console.agent = id;
+        state.console.target = id;
         state.console.model = 'auto';
         state.console.effort = 'medium';
-        initConsoleForm();
+        refreshTaskList();
+        const tgt = $('#f-target');
+        if (tgt) tgt.value = id;
+        const a0 = ((state.status && state.status.agents) || []).find(x => x.id === id);
+        const m0 = (a0 && Array.isArray(a0.models) && a0.models.length) ? a0.models : ['auto', 'deepseek-v4-flash', 'deepseek-v4-pro'];
+        const msel = $('#f-model');
+        if (msel) msel.innerHTML = m0.map(x => `<option value="${esc(x)}">${x === 'auto' ? '自动(按思考强度)' : esc(x)}</option>`).join('');
         break;
       case 'set-effort':
         state.console.effort = el.dataset.v;
@@ -1564,10 +1710,10 @@ document.addEventListener('click', async e => {
         break;
       case 'submit-task': submitTask(); break;
       case 'cancel-task':
-        if (state.console.taskId) {
-          await api('/api/tasks/' + state.console.taskId + '/cancel', { method: 'POST' });
-          toast('已请求取消任务');
-        }
+        await cancelLiveTurns();
+        break;
+      case 'new-room': createRoom(); break;
+      case 'clear-room': deleteCurrentRoom(); break;
         break;
       case 'oneclick': oneClickInspect(); break;
       case 'view-task': viewTask(id); break;
@@ -1634,7 +1780,7 @@ document.addEventListener('click', async e => {
         state.console.pendingConfirm = null;
         const node = $('#chat-msg-' + pc.sysId);
         if (node) node.remove();
-        sendTask(pc);
+        sendRoomMessage(pc);
         break;
       }
       case 'reject-send': {

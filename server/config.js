@@ -12,6 +12,7 @@ export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 export const MEMORY_FILE = path.join(DATA_DIR, 'memory.json');
+export const ROOMS_FILE = path.join(DATA_DIR, 'rooms.json');
 const HOME = os.homedir();
 export const MEMORY_MD_FILE = process.env.MEMORY_MD_FILE || path.join(HOME, 'MEMORY.md');
 export const ASSETS_DIR = path.join(ROOT, 'assets');
@@ -51,6 +52,17 @@ export function defaultConfig() {
       maxContextChars: 3000, // 共享上下文单次注入上限(字符)
       recallLimit: 6,      // 相关记忆单次召回条数
       maxInjectedChars: 6000 // 注入内容总长上限(字符)
+    },
+    room: {                // 多 Agent 群聊
+      transcriptLimit: 12, // 每次注入群聊上下文最近消息条数(上一条/自然衔接)
+      maxChars: 12000,     // 群聊上下文注入总长上限(字符)
+      turnBudget: 8,       // 单条用户消息最多派发的 Agent 轮次(含@转派,防死循环)
+      mentionDepth: 2,     // @ 转派最大层数(0=禁止自动转派,1=只转派一层,…)
+      stuckMinutes: 6,     // 代理长时间无输出(分钟)自动@其他 Agent 求助;0=关闭
+      autoEscalate: true,  // 卡住时是否自动请求其他 Agent 协助
+      memoryBriefChars: 700, // 群聊内注入的置顶共享上下文长度上限(字符)
+      memoryRecall: 3,     // 群聊内按最后一条用户消息召回的相关记忆条数(以群聊上下文为主)
+      broadcast: false     // 默认是否把消息广播给所有参与 Agent(否则只发给 target/首个可用)
     },
     agents: {
       codex: {

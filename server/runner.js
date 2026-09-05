@@ -65,12 +65,13 @@ export class Runner {
       useMemory: t.useMemory !== false,
       status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, finishedAt: t.finishedAt,
       exitCode: t.exitCode, error: t.error ? String(t.error).slice(0, 300) : null,
-      output: (t.output || '').slice(-5000)
+      output: (t.output || '').slice(-5000),
+      room: t.room || null
     }));
     try { fs.writeFileSync(TASKS_FILE, JSON.stringify(arr, null, 2)); } catch { /* ignore */ }
   }
 
-  submit({ agentId, model, effort, prompt, useMemory }) {
+  submit({ agentId, model, effort, prompt, useMemory, room = null }) {
     if (!agentId || !this.agents.get(agentId)) throw new Error(`未知 Agent:${agentId}`);
     const agent = this.agents.get(agentId);
     if (!agent.enabled()) throw new Error(`${agent.name} 已停用,请先在 Agent 管理页开启`);
@@ -90,6 +91,7 @@ export class Runner {
       maxMinutes: this.config.maxTaskMinutes || 30,
       useMemory: useMemory !== false, // 是否把共享上下文/记忆注入 prompt
       injected: null,                // 注入后记录(供详情查看)
+      room: room,                    // 群聊关联: { roomId, messageId, groupId } | null
       _seq: 0 // 事件序号(SSE 重连重放去重用)
     };
     this.tasks.set(task.id, task);
