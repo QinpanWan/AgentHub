@@ -14,11 +14,16 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
-  '.md': 'text/plain; charset=utf-8'
+  '.md': 'text/plain; charset=utf-8',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.map': 'application/json; charset=utf-8'
 };
 
-export function createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat }) {
-  const state = { config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat };
+export function createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat, contextInsights }) {
+  const state = { config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat, contextInsights };
 
   const server = http.createServer((req, res) => {
     try {
@@ -47,7 +52,7 @@ async function handle(req, res, s) {
 }
 
 async function handleApi(req, res, s, method, p, u) {
-  const { config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat } = s;
+  const { config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat, contextInsights } = s;
   const seg = p.split('/').filter(Boolean); // ['api', ...]
 
   // —— 健康检查 ——
@@ -248,6 +253,24 @@ async function handleApi(req, res, s, method, p, u) {
   // —— 一键巡检 ——
   if (p === '/api/oneclick/inspect' && method === 'POST') {
     return oneClickInspect(res, s);
+  }
+
+  // —— dsh-context 面板（三 Agent 聚合数据） ——
+  if (p.startsWith('/api/dsh-context/') && method === 'POST') {
+    if (!contextInsights) return sendErr(res, 503, '上下文洞察服务未就绪');
+    const op = p.slice('/api/dsh-context/'.length);
+    try {
+      if (op === 'overview') {
+        const body = await readBody(req);
+        return sendJson(res, { ok: true, value: await contextInsights.overview(body) });
+      }
+      if (op === 'skills') return sendJson(res, { ok: true, value: await contextInsights.skills() });
+      if (op === 'version') return sendJson(res, { ok: true, value: contextInsights.version() });
+      if (op === 'balance') return sendJson(res, { ok: true, value: contextInsights.balance() });
+      if (op === 'backfill') return sendJson(res, { ok: true, value: contextInsights.backfill() });
+    } catch (e) {
+      return sendErr(res, 400, `上下文洞察请求失败:${e.message}`);
+    }
   }
 
   // —— 插件 / 技能 ——
@@ -645,7 +668,10 @@ function readBody(req) {
 }
 
 function serveStatic(res, p) {
-  const rel = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
+  let rel = p.replace(/^\/+/, '');
+  if (rel === '') rel = 'index.html';
+  else if (p === '/context-panel') rel = 'context-panel/index.html';
+  else if (p.endsWith('/')) rel = path.join(rel, 'index.html');
   const file = path.normalize(path.join(WEB_DIR, rel));
   if (!file.startsWith(WEB_DIR)) return sendErr(res, 403, 'Forbidden');
   fs.readFile(file, (err, buf) => {

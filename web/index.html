@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentHub · 跨 Agent 管理平台</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=20261115-context-trend2">
 </head>
 <body>
 <div id="app">
@@ -29,6 +29,10 @@
       <a href="#/monitor" data-view="monitor">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 4 14 2.5-7h5"/></svg>
         <span class="nav-label">运行监控</span>
+      </a>
+      <a href="#/context" data-view="context">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/><circle cx="4" cy="9" r="1.2" fill="currentColor" stroke="none"/><circle cx="10" cy="5" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>
+        <span class="nav-label">上下文洞察</span>
       </a>
       <a href="#/logs" data-view="logs">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>
@@ -72,6 +76,7 @@
       <div id="view-console" class="view hidden"></div>
       <div id="view-agents" class="view hidden"></div>
       <div id="view-monitor" class="view hidden"></div>
+      <div id="view-context" class="view hidden"></div>
       <div id="view-logs" class="view hidden"></div>
       <div id="view-plugins" class="view hidden"></div>
       <div id="view-workspaces" class="view hidden"></div>
@@ -83,6 +88,6 @@
 
 <div id="toast-root"></div>
 <div id="modal-root" class="hidden"></div>
-<script src="/app.js"></script>
+<script src="/app.js?v=20261115-context-trend2"></script>
 </body>
 </html>

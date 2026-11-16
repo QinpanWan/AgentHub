@@ -256,6 +256,41 @@ async function l1() {
   t('dsh 插件扫描不抛错', Array.isArray(dshPlugins));
   const skills = pl.listSkills();
   t('技能扫描不抛错', Array.isArray(skills));
+
+  // 7. 上下文洞察趋势
+  console.log('  上下文洞察趋势:');
+  const { ContextInsights } = await import(path.join(ROOT, 'server', 'context.js'));
+  const ci = new ContextInsights({});
+  const trendRows = [{
+    id: 's-trend', agent: 'codex', group: 'Codex', title: '趋势测试', updatedAt: Date.now(),
+    turns: 1, steps: 3, contextTotal: 300,
+    series: [
+      { seq: 1, turn: 1, step: 1, total: 80, system: 40, user: 40 },
+      { seq: 2, turn: 1, step: 2, total: 120, system: 40, user: 40, tool: 40 },
+      { seq: 3, turn: 1, step: 3, total: 100, system: 40, user: 60 },
+    ],
+  }];
+  const trend = ci._trend(trendRows, {});
+  t('trend 返回选中会话与数据点', trend.sessions.length === 1 && trend.selected === 's-trend' && trend.points.length === 3);
+  const pickedTrend = ci._trend(trendRows, { sessionId: 's-trend' });
+  t('trend 支持指定会话', pickedTrend.selected === 's-trend' && pickedTrend.points[0].seq === 1);
+  const panelDir = path.join(ROOT, 'web', 'context-panel');
+  const panelHtml = fs.readFileSync(path.join(panelDir, 'index.html'), 'utf8');
+  t('趋势卡资源已接入面板', panelHtml.includes('trend-card.js') && panelHtml.includes('trend-card.css')
+    && fs.existsSync(path.join(panelDir, 'trend-card.js')) && fs.existsSync(path.join(panelDir, 'trend-card.css')));
+  const appHtml = fs.readFileSync(path.join(ROOT, 'web', 'index.html'), 'utf8');
+  const appVersion = '?v=20261115-context-trend2';
+  t('首页与面板资源带版本号，避免 WebView 复用旧脚本',
+    appHtml.includes('style.css' + appVersion) && appHtml.includes('app.js' + appVersion)
+    && panelHtml.includes('trend-card.js' + appVersion) && panelHtml.includes('boot.js' + appVersion));
+  const bootSrc = fs.readFileSync(path.join(panelDir, 'boot.js'), 'utf8');
+  t('boot 注入趋势卡到 .lc-ov-body，并回退 .lc-ov-pagecontent',
+    bootSrc.includes("querySelector('.lc-ov-body')")
+    && bootSrc.includes("querySelector('.lc-ov-pagecontent')")
+    && bootSrc.includes('__AGENTHUB_TREND__'));
+  const trendJs = fs.readFileSync(path.join(panelDir, 'trend-card.js'), 'utf8');
+  t('趋势卡模式按钮齐全且拉取 trend', ['DNA 模式', '自适应', '耗时', '总览', '步骤', '轮次', '全量', '增量'].every(x => trendJs.includes(x))
+    && trendJs.includes("part: 'trend'"));
 }
 
 async function waitTerminal(runner, id, timeoutMs) {
@@ -378,6 +413,18 @@ async function l2() {
     req.on('error', () => resolve({ code: 0, html: '' }));
   });
   t('静态首页可访问', staticHtml.code === 200 && staticHtml.html.includes('AgentHub'));
+  const panelHtml = await new Promise(resolve => {
+    const req = http.get(BASE + '/context-panel/', res => {
+      let b = ''; res.on('data', c => b += c);
+      res.on('end', () => resolve({ code: res.statusCode, html: b }));
+    });
+    req.on('error', () => resolve({ code: 0, html: '' }));
+  });
+  t('上下文面板入口可访问', panelHtml.code === 200 && panelHtml.html.includes('dsh-context'));
+  const rTrend = await post('/api/dsh-context/overview', { part: 'trend', scope: { range: '30d', coverage: 'all' } });
+  const trendValue = rTrend.data && rTrend.data.value && rTrend.data.value.trend;
+  t('POST /api/dsh-context/overview trend', rTrend.code === 200 && rTrend.data && rTrend.data.ok === true
+    && trendValue && Array.isArray(trendValue.sessions) && Array.isArray(trendValue.points));
   const staticCss = await new Promise(resolve => {
     const req = http.get(BASE + '/style.css', res => {
       let b = ''; res.on('data', c => b += c);

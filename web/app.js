@@ -144,7 +144,7 @@ const state = {
   timers: []
 };
 
-const TITLES = { overview: '概览', console: '任务控制台', agents: 'Agent 管理', monitor: '运行监控', logs: '日志与报错', plugins: '插件与技能', workspaces: '工作区', memory: '共享记忆', settings: '设置' };
+const TITLES = { overview: '概览', console: '任务控制台', agents: 'Agent 管理', monitor: '运行监控', context: '上下文洞察', logs: '日志与报错', plugins: '插件与技能', workspaces: '工作区', memory: '共享记忆', settings: '设置' };
 
 // 设置页:各 Agent 预设模型清单与提供商选项
 const PRESET_MODELS = {
@@ -163,6 +163,8 @@ function switchView(view) {
   state.view = view;
   $$('.nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   $$('.view').forEach(v => v.classList.add('hidden'));
+  const content = $('.content');
+  if (content) content.classList.toggle('context-fill', view === 'context');
   const vEl = $('#view-' + view);
   if (vEl) vEl.classList.remove('hidden');
   $('#page-title').textContent = TITLES[view] || view;
@@ -175,7 +177,8 @@ function loadView(view) {
   clearInterval(state._viewTimer);
   if (state.console.roomTimer) { clearInterval(state.console.roomTimer); state.console.roomTimer = null; }
   try {
-    if (view === 'monitor') { refreshMonitorData(); state._viewTimer = setInterval(refreshMonitorData, 3000); }
+    if (view === 'context') { ensureContextPanel(); }
+    else if (view === 'monitor') { refreshMonitorData(); state._viewTimer = setInterval(refreshMonitorData, 3000); }
     else if (view === 'logs') { renderLogsView(); refreshLogs(); state._viewTimer = setInterval(refreshLogs, 3000); }
     else if (view === 'plugins') { refreshPlugins(); }
     else if (view === 'workspaces') { renderWorkspaces(); }
@@ -201,6 +204,53 @@ function loadView(view) {
     else if (view === 'agents') { refreshStatus(); }
   } catch (e) { toast('视图加载错误: ' + e.message, 'err'); }
 }
+
+function ensureContextPanel() {
+  const el = $('#view-context');
+  if (!el) return;
+  if (el.dataset.mounted === '1') {
+    // 面板自愈:之前加载的 iframe 若来自旧版(无趋势卡片宿主),重新拉取新版.
+    const old = el.querySelector('iframe.context-frame');
+    if (old && !old.dataset.retried) {
+      let doc = null;
+      try { doc = old.contentDocument; } catch (_) { doc = null; }
+      if (doc && doc.readyState === 'complete' && !doc.getElementById('agenthub-trend-host')) {
+        old.dataset.retried = '1';
+        old.src = '/context-panel/?v=' + Date.now();
+      }
+    }
+    return;
+  }
+  el.dataset.mounted = '1';
+  const frame = document.createElement('iframe');
+  frame.className = 'context-frame';
+  frame.title = '上下文洞察 · dsh-context';
+  frame.src = '/context-panel/?v=' + Date.now();
+  // 首次加载完成后再校验一次:旧版面板没有趋势卡片挂载点,带新参数重载一次.
+  frame.addEventListener('load', () => {
+    setTimeout(() => {
+      if (frame.dataset.retried) return;
+      let doc = null;
+      try { doc = frame.contentDocument; } catch (_) { doc = null; }
+      if (doc && doc.readyState === 'complete' && !doc.getElementById('agenthub-trend-host')) {
+        frame.dataset.retried = '1';
+        frame.src = '/context-panel/?v=' + Date.now();
+      }
+    }, 1200);
+  });
+  el.appendChild(frame);
+}
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== location.origin || !event.data) return;
+  if (event.data.type === 'agenthub:context-error') {
+    toast('上下文洞察加载失败: ' + String(event.data.message || '未知错误'), 'err');
+  } else if (event.data.type === 'agenthub:context-open-session') {
+    toast('该会话由对应 Agent 管理，AgentHub 当前展示三端聚合统计');
+  } else if (event.data.type === 'agenthub:context-open-settings') {
+    location.hash = '#/settings';
+  }
+});
 async function refreshStatus() {
   try {
     const d = await api('/api/status');

@@ -9,6 +9,7 @@ import { Workspaces } from './workspace.js';
 import { MemoryHub } from './memory.js';
 import { initRooms } from './room.js';
 import { createServer } from './http.js';
+import { ContextInsights } from './context.js';
 
 ensureDirs();
 const config = loadConfig();
@@ -21,6 +22,7 @@ const runner = new Runner({ agents, logstore, config, memory });
 const { roomHub, roomChat } = initRooms({ agents, runner, memory, config, logstore });
 const plugins = new Plugins({ config, logstore });
 const workspaces = new Workspaces({ config });
+const contextInsights = new ContextInsights({ runner, agents, logstore });
 
 // 长稳运行兜底:未捕获异常/未处理拒绝记入日志并继续,不让整个服务崩溃
 process.on('uncaughtException', (e) => {
@@ -34,7 +36,7 @@ process.on('unhandledRejection', (e) => {
   try { logstore.push('system', 'error', String(msg).slice(0, 500)); } catch { /* ignore */ }
 });
 
-const server = createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat });
+const server = createServer({ config, logstore, monitor, agents, runner, plugins, workspaces, memory, roomHub, roomChat, contextInsights });
 
 monitor.start();
 agents.start();

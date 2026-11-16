@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" data-platform="linux">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>上下文洞察 · dsh-context</title>
+<base href="/">
+<link rel="stylesheet" href="/context-panel/theme.css?v=20261115-context-trend2">
+<link rel="stylesheet" href="/context-panel/vendor.css?v=20261115-context-trend2">
+<link rel="stylesheet" href="/context-panel/trend-card.css?v=20261115-context-trend2">
+<style>
+  html, body { width: 100%; height: 100%; margin: 0; }
+  body { overflow: hidden; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); }
+  #root { width: 100%; height: 100%; }
+  #boot-error { display: none; box-sizing: border-box; height: 100%; padding: 32px; overflow: auto; font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--dsw-alias-state-error-primary); background: var(--dsw-alias-bg-base); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<pre id="boot-error"></pre>
+<script src="/context-panel/vendor.js?v=20261115-context-trend2"></script>
+<script src="/context-panel/dsh-context-client.js?v=20261115-context-trend2"></script>
+<script src="/context-panel/trend-card.js?v=20261115-context-trend2"></script>
+<script src="/context-panel/boot.js?v=20261115-context-trend2"></script>
+</body>
+</html>

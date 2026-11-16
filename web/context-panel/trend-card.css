@@ -1,0 +1,322 @@
+.ah-trend-card {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.ah-trend-ctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ah-trend-mods {
+  margin-left: 4px;
+}
+
+.ah-trend-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: -2px 0 9px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+}
+
+.ah-trend-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 460px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  padding: 0 7px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.ah-trend-live {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ah-trend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-green-500);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-green-500) 18%, transparent);
+  animation: ah-trend-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ah-trend-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.ah-trend-meta {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ah-trend-body {
+  min-width: 0;
+}
+
+.ah-trend-chartrow {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ah-trend-axis {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 130px;
+  padding-top: 18px;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ah-trend-axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.ah-trend-axis-top { top: 18px; }
+.ah-trend-axis-mid { top: 74px; }
+.ah-trend-axis-bot { top: 130px; }
+
+.ah-trend-chartwrap {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ah-trend-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  padding-bottom: var(--dsh-scrollbar-width, 8px);
+}
+
+.ah-trend-chart {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 130px;
+  padding: 18px 2px 0;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+}
+
+.ah-trend-fit .ah-trend-chart {
+  width: 100%;
+  min-width: 0;
+}
+
+.ah-trend-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--dsw-alias-border-l2) 75%, transparent);
+  pointer-events: none;
+}
+
+.ah-trend-grid-top { top: 18px; }
+.ah-trend-grid-mid { top: 74px; }
+.ah-trend-grid-bot {
+  top: 130px;
+  border-top-style: solid;
+  border-top-color: color-mix(in srgb, var(--color-neutral-500) 50%, transparent);
+}
+
+.ah-trend-bar {
+  position: relative;
+  flex: none;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  cursor: pointer;
+  border-radius: 2px;
+  outline: 1px dashed transparent;
+  outline-offset: 1px;
+  transition: outline-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ah-trend-fit .ah-trend-bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  width: auto;
+}
+
+.ah-trend-bar:hover,
+.ah-trend-bar-hovered {
+  outline-color: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--color-neutral-500) 13%, transparent);
+}
+
+.ah-trend-bar-pinned {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 1px;
+}
+
+.ah-trend-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+}
+
+.ah-trend-stack > div {
+  width: 100%;
+}
+
+.ah-trend-stack > div:first-child {
+  border-radius: 0 0 2px 2px;
+}
+
+.ah-trend-stack > div:last-child {
+  border-radius: 2px 2px 0 0;
+}
+
+.ah-trend-stack > div:only-child {
+  border-radius: 2px;
+}
+
+.ah-trend-dna .ah-trend-seg {
+  border-top: 1px solid color-mix(in srgb, #000 18%, transparent);
+  filter: saturate(1.18);
+}
+
+.ah-trend-dna .ah-trend-seg:first-child {
+  border-top: 0;
+}
+
+.ah-trend-duration {
+  position: absolute;
+  top: 18px;
+  left: 2px;
+  right: 2px;
+  width: calc(100% - 4px);
+  height: 112px;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ah-trend-duration polyline {
+  fill: none;
+  stroke: var(--dsw-alias-label-tertiary);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.ah-trend-tip {
+  position: absolute;
+  top: 0;
+  z-index: 6;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 260px;
+  box-sizing: border-box;
+  overflow-wrap: break-word;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--dsw-alias-label-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.ah-trend-tip span + span {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.ah-trend-turns {
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  margin-top: 3px;
+  padding: 0 2px;
+  box-sizing: border-box;
+  min-width: 100%;
+}
+
+.ah-trend-fit .ah-trend-turns {
+  width: 100%;
+  min-width: 0;
+}
+
+.ah-trend-turn {
+  flex: none;
+  box-sizing: border-box;
+  height: 14px;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  border-radius: 3px;
+}
+
+.ah-trend-fit .ah-trend-turn {
+  flex: none;
+}
+
+.ah-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+}
+
+.ah-trend-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.ah-trend-swatch {
+  width: 9px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+@container lc-ov (max-width: 720px) {
+  .ah-trend-ctl { margin-left: 0; }
+  .ah-trend-mods { order: 3; width: 100%; margin-left: 0; }
+  .ah-trend-select { max-width: none; }
+}

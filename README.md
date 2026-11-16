@@ -253,6 +253,7 @@ MIT License。
 
 ## 更新记录
 
+- **v1.6（2026-11-15）**：上下文洞察新增实时「上下文趋势」卡片（三 Agent 会话切换、4s 刷新；DNA 模式/自适应/耗时/总览/步骤/轮次/全量/增量），后端 `overview` 新增 `part:"trend"` 请求级序列；面板在原版页面 `.lc-ov-body` 内隔离挂载，不改原版组件与样式。自测补充 trend 接口与前端资源回归。
 - **v1.5（2026-09-05）**：任务控制台升级为多 Agent 群聊（房间/消息持久化 + `@` 点名转派 + 卡住自动求助），并修复群聊链路关键 bug：
   - 修复：`server/http.js` `createServer` 漏收 `roomHub/roomChat`，导致 `/api/rooms` 永远返回空、发消息 500；房间/消息路由正则不匹配 `r`/`m` 前缀 ID，导致群聊页读不到历史、发不出消息（真正根因）
   - 修复：`submit` 返回的 room 含运行中的 `timers`（Node Timeout），`sendJson` 序列化循环引用爆掉；`rooms.json` 落盘不再写入 live Timer 与批次 `groupId`

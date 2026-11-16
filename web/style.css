@@ -162,6 +162,9 @@ code { font-size: .93em; }
 .chip-warn { color: var(--warn-600); border-color: var(--warn-300); background: var(--warn-050); }
 .chip-err { color: var(--err-600); border-color: var(--err-300); background: var(--err-050); }
 .content { flex: 1; overflow-y: auto; padding: 24px 28px 56px; }
+.content.context-fill { padding: 0; overflow: hidden; }
+#view-context { height: 100%; }
+.context-frame { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
 
 /* ================= 卡片 / 网格 ================= */
 .card { background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: 18px 20px; box-shadow: var(--shadow-1); }
